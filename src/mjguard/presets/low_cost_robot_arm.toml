@@ -14,6 +14,14 @@ tcp_body = "gripper_static_finger"
 tool_axis = "-x"
 actuators = ["base_rotation", "pitch", "elbow", "wrist_pitch", "wrist_roll"]
 
+[gripper]
+joints = ["gripper"]
+closed = [0.0]
+open = [-1.4]
+actuator = "gripper"
+ctrl_closed = 0.0
+ctrl_open = -1.4
+
 [limits]
 min_clearance_mm = 20
 planning_margin_mm = 10

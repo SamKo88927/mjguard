@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass, field
 from typing import Any
@@ -15,7 +16,8 @@ CODES = {
     "JOINT_LIMIT": "a joint would leave its allowed range",
     "TABLE_CLEARANCE": "a moving part would come too close to the floor or table",
     "TABLE_COLLISION": "a moving part would touch the floor or table",
-    "COLLISION": "the arm would touch itself or something in the scene",
+    "COLLISION": "the arm would touch itself, an obstacle or something else in the scene",
+    "OBSTACLE_CLEARANCE": "a moving part would come too close to a configured obstacle",
     "WORKSPACE": "the tool point would leave the configured workspace box",
     "UNREACHABLE": "no joint solution reaches the target within tolerance",
     "BAD_TARGET": "the request is malformed",
@@ -44,6 +46,9 @@ class Refusal:
 class Plan:
     waypoints: list[Vec]
     min_clearance_mm: float
+
+
+LINE_STEP_M = 0.005
 
 
 def _mm(v: float) -> float:
@@ -89,7 +94,8 @@ class Guard:
             return refusal, math.nan
         for c in self.model.contacts(q, gripper):
             if c.floor:
-                return Refusal("TABLE_COLLISION", f"{c.a if c.b == 'world' else c.b} would touch the floor"), 0.0
+                part = c.b if c.a == self.config.floor_geom else c.a
+                return Refusal("TABLE_COLLISION", f"{part} would touch the floor"), 0.0
             return Refusal("COLLISION", f"{c.a} would touch {c.b} ({c.depth_mm} mm deep)", {"a": c.a, "b": c.b}), 0.0
         clearance = self.model.clearance_mm(q, gripper)
         if clearance < self.limits.planning_clearance_mm:
@@ -99,6 +105,17 @@ class Guard:
                     f"a moving part would be {clearance:.1f} mm above the floor; plans keep at least "
                     f"{self.limits.planning_clearance_mm:g} mm",
                     {"clearance_mm": round(clearance, 1)},
+                ),
+                clearance,
+            )
+        gap, part, obstacle = self.model.obstacle_clearance(q, gripper)
+        if gap < self.limits.obstacle_clearance_mm:
+            return (
+                Refusal(
+                    "OBSTACLE_CLEARANCE",
+                    f"{part} would be {max(gap, 0):.1f} mm from {obstacle}; plans keep at least "
+                    f"{self.limits.obstacle_clearance_mm:g} mm",
+                    {"part": part, "obstacle": obstacle, "gap_mm": round(max(gap, 0), 1)},
                 ),
                 clearance,
             )
@@ -161,7 +178,9 @@ class Guard:
             )
         return best[1]
 
-    def plan_pose(self, current: Vec, target: Vec, direction: Vec | None, gripper: Vec | None = None) -> Plan | Refusal:
+    def plan_pose(
+        self, current: Vec, target: Vec, direction: Vec | None, gripper: Vec | None = None, line: bool = False
+    ) -> Plan | Refusal:
         if not np.all(np.isfinite(target)):
             return Refusal("BAD_TARGET", "target coordinates must be finite numbers")
         refusal = self.check_workspace(target)
@@ -175,16 +194,66 @@ class Guard:
                 f"{self.limits.planning_clearance_mm:g} mm above it",
                 {"z_mm": round(height, 1)},
             )
+        if line:
+            return self.plan_line(current, target, direction, gripper)
         q = self.solve(target, direction, current)
         if isinstance(q, Refusal):
             return q
         return self.check_path(current, q, gripper)
 
+    def plan_line(self, current: Vec, target: Vec, direction: Vec | None, gripper: Vec | None = None) -> Plan | Refusal:
+        """The tool point follows the straight line to the target, sampled every LINE_STEP_M.
+
+        The tool axis turns smoothly from where it points now to `direction` (or keeps pointing where it points now).
+        IK is solved point by point from the previous solution, so the arm cannot flip configuration mid-line; a
+        jump bigger than a few waypoint steps means the line crosses a singularity or leaves reach, and is refused.
+        """
+        start, axis0 = self.model.tool(current)
+        axis1 = axis0 if direction is None else direction
+        if float(axis0 @ axis1) < -0.95:
+            return Refusal("UNREACHABLE", "the tool would have to flip over along the line; move with path='joint'")
+        span = float(np.linalg.norm(target - start))
+        steps = max(1, math.ceil(span / LINE_STEP_M))
+        q = current.astype(float).copy()
+        sampled = [q]
+        jump_limit = 4 * float(np.min(self.max_step)) * max(1.0, LINE_STEP_M / 0.005)
+        for i in range(1, steps + 1):
+            t = i / steps
+            point = start + (target - start) * t
+            axis = axis0 * (1 - t) + axis1 * t
+            axis /= np.linalg.norm(axis)
+            nxt, pos_err, ang_err = self.model.solve_ik(point, axis, q, self.lower, self.upper, iters=60)
+            if pos_err > self.limits.position_tolerance_mm or ang_err > self.limits.angle_tolerance_deg:
+                return Refusal(
+                    "UNREACHABLE",
+                    f"the straight line leaves the arm's reach {t:.0%} of the way (misses by {pos_err:.1f} mm)",
+                    {"fraction": round(t, 2)},
+                )
+            if float(np.max(np.abs(nxt - q))) > jump_limit:
+                return Refusal(
+                    "UNREACHABLE",
+                    f"the straight line crosses a singularity {t:.0%} of the way; the joints would jump",
+                    {"fraction": round(t, 2)},
+                )
+            q = nxt
+            sampled.append(q)
+        waypoints: list[Vec] = []
+        for a, b in itertools.pairwise(sampled):
+            waypoints += interpolate(a, b, float(np.min(self.max_step)))
+        lowest = math.inf
+        for i, w in enumerate(waypoints):
+            refusal, clearance = self.check_configuration(w, gripper)
+            if refusal is not None:
+                refusal.details["waypoint"] = f"{i + 1}/{len(waypoints)}"
+                return refusal
+            lowest = min(lowest, clearance)
+        return Plan(waypoints, lowest)
+
     def plan_pose_with_fallback(
-        self, current: Vec, target: Vec, direction: Vec | None, gripper: Vec | None = None
+        self, current: Vec, target: Vec, direction: Vec | None, gripper: Vec | None = None, line: bool = False
     ) -> Plan | Refusal:
         """Plan to target; on refusal, attach the farthest checked-safe pose on the straight line toward it."""
-        plan = self.plan_pose(current, target, direction, gripper)
+        plan = self.plan_pose(current, target, direction, gripper, line)
         if not isinstance(plan, Refusal) or plan.code == "BAD_TARGET":
             return plan
         start, _ = self.model.tool(current)
@@ -193,7 +262,7 @@ class Guard:
         for _ in range(10):
             mid = (lo + hi) / 2
             point = np.round((start + (target - start) * mid) * 10000) / 10000  # 0.1 mm, what the model sends back
-            if isinstance(self.plan_pose(current, point, direction, gripper), Plan):
+            if isinstance(self.plan_pose(current, point, direction, gripper, line), Plan):
                 lo, good = mid, point
             else:
                 hi = mid
@@ -203,8 +272,9 @@ class Guard:
                 "y_mm": _mm(float(good[1])),
                 "z_mm": _mm(float(good[2]) - self.model.floor_z),
                 "tool_down": direction is not None,
+                "path": "line" if line else "joint",
                 "note": f"farthest checked-safe point on the straight line toward the target ({lo:.0%} of the way); "
-                "send it with the same tool_down",
+                "send it with the same tool_down and path",
             }
         return plan
 
@@ -228,5 +298,10 @@ class Guard:
             "max_joint_speed_dps": lim.max_joint_speed_dps,
             "joints": joints,
             "has_gripper": self.config.gripper is not None,
+            "obstacle_clearance_mm": lim.obstacle_clearance_mm,
+            "obstacles": [
+                {"name": o.name, "shape": o.shape, "size_mm": list(o.size_mm), "center_mm": list(o.center_mm)}
+                for o in self.config.obstacles
+            ],
             "refusal_codes": CODES,
         }

@@ -7,12 +7,12 @@
     "url": "https://github.com/SamKo88927/mjguard",
     "source": "github"
   },
-  "version": "0.2.0",
+  "version": "0.3.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mjguard",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "transport": {
         "type": "stdio"
       },

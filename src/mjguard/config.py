@@ -32,6 +32,8 @@ class Limits:
     max_joint_speed_dps: float = 60.0
     workspace_mm: dict[str, tuple[float, float]] = field(default_factory=dict[str, tuple[float, float]])
     """Optional box for the tool point, e.g. {"x": (-400, 600)}. Missing axes are unbounded."""
+    obstacle_clearance_mm: float = 10.0
+    """Plans keep every moving collision geom at least this far from every configured obstacle."""
     position_tolerance_mm: float = 1.0
     angle_tolerance_deg: float = 1.5
 
@@ -44,6 +46,8 @@ class Limits:
             value = getattr(self, name)
             if not (math.isfinite(value) and value > 0):
                 raise ConfigError(f"limits.{name} must be a positive number, got {value!r}")
+        if not (math.isfinite(self.obstacle_clearance_mm) and self.obstacle_clearance_mm >= 0):
+            raise ConfigError("limits.obstacle_clearance_mm must be >= 0")
         if not (math.isfinite(self.planning_margin_mm) and self.planning_margin_mm >= 0):
             raise ConfigError("limits.planning_margin_mm must be >= 0")
         if not (math.isfinite(self.joint_margin_deg) and self.joint_margin_deg >= 0):
@@ -51,6 +55,26 @@ class Limits:
         for axis, bounds in self.workspace_mm.items():
             if axis not in ("x", "y", "z") or len(bounds) != 2 or not bounds[0] < bounds[1]:
                 raise ConfigError(f"limits.workspace_mm.{axis} must be [low, high] with low < high")
+
+
+@dataclass(frozen=True)
+class Obstacle:
+    """A static box, cylinder or sphere in the scene. Millimetres; z is the height of its centre above the floor."""
+
+    name: str
+    shape: str
+    size_mm: tuple[float, ...]
+    """box: [x, y, z] full extents; cylinder: [diameter, height] with a vertical axis; sphere: [diameter]."""
+    center_mm: tuple[float, float, float]
+
+    def __post_init__(self) -> None:
+        sizes = {"box": 3, "cylinder": 2, "sphere": 1}
+        if self.shape not in sizes:
+            raise ConfigError(f"obstacle {self.name!r}: shape must be box, cylinder or sphere")
+        if len(self.size_mm) != sizes[self.shape] or not all(math.isfinite(v) and v > 0 for v in self.size_mm):
+            raise ConfigError(f"obstacle {self.name!r}: {self.shape} needs {sizes[self.shape]} positive size_mm values")
+        if len(self.center_mm) != 3 or not all(math.isfinite(v) for v in self.center_mm):
+            raise ConfigError(f"obstacle {self.name!r}: center_mm must be [x, y, z]")
 
 
 @dataclass(frozen=True)
@@ -78,6 +102,7 @@ class RobotConfig:
     actuators: tuple[str, ...] = ()
     """Position actuators for the arm joints, in the same order. Empty: the simulator moves joints kinematically."""
     gripper: Gripper | None = None
+    obstacles: tuple[Obstacle, ...] = ()
     limits: Limits = field(default_factory=Limits)
 
     def __post_init__(self) -> None:
@@ -89,6 +114,9 @@ class RobotConfig:
             raise ConfigError("arm.tool_axis must be one of x, y, z, -x, -y, -z")
         if self.actuators and len(self.actuators) != len(self.joints):
             raise ConfigError("arm.actuators must have one entry per joint, or be empty")
+        names = [o.name for o in self.obstacles]
+        if len(set(names)) != len(names):
+            raise ConfigError("obstacle names must be unique")
 
 
 def _menagerie(name: str) -> Path:
@@ -141,6 +169,16 @@ def from_dict(data: dict[str, Any], base: Path) -> RobotConfig:
         )
         if not (len(gripper.joints) == len(gripper.closed) == len(gripper.open)):
             raise ConfigError("gripper.joints, gripper.closed and gripper.open must have the same length")
+    obstacles: list[Obstacle] = []
+    for i, o in enumerate(data.get("obstacles", [])):
+        obstacles.append(
+            Obstacle(
+                name=str(o.get("name", f"obstacle_{i + 1}")),
+                shape=str(_require(o, "shape", f"obstacles[{i}]")),
+                size_mm=tuple(float(v) for v in _require(o, "size_mm", f"obstacles[{i}]")),
+                center_mm=tuple(float(v) for v in _require(o, "center_mm", f"obstacles[{i}]")),  # type: ignore[arg-type]
+            )
+        )
     return RobotConfig(
         name=str(data.get("name", "robot")),
         mjcf=resolve_mjcf(str(_require(model, "mjcf", "model")), base),
@@ -153,6 +191,7 @@ def from_dict(data: dict[str, Any], base: Path) -> RobotConfig:
         tool_axis=str(arm.get("tool_axis", "z")),
         actuators=tuple(arm.get("actuators", ())),
         gripper=gripper,
+        obstacles=tuple(obstacles),
         limits=limits,
     )
 

@@ -44,6 +44,11 @@ def test_preset(preset: str) -> None:
     hard = config.limits.min_clearance_mm
     guard = executor.guard
     assert guard.check_configuration(guard.model.home, guard.model.home_gripper)[0] is None
+    if config.gripper is not None:  # at the rest pose, well clear of the table
+        for opening in (1.0, 0.0, 0.5):
+            g = executor.gripper(opening)
+            assert g["ok"] is True, g["refusal"]
+            assert abs(g["state"]["gripper_opening"] - opening) < 0.05
 
     target = TARGETS[preset]
     r = executor.move_to(*target)
@@ -62,7 +67,20 @@ def test_preset(preset: str) -> None:
         follow = executor.move_to(s["x_mm"], s["y_mm"], s["z_mm"], tool_down=s["tool_down"])
         assert follow["ok"] is True, follow["refusal"]
         assert follow["executed"]["min_clearance_mm"] >= hard
+    line = executor.move_to(target[0], target[1], target[2] + 40, tool_down=r["state"]["tool"]["axis"][2] < -0.99)
+    if line["ok"]:
+        down = executor.move_to(
+            target[0], target[1], target[2], tool_down=line["state"]["tool"]["axis"][2] < -0.99, path="line"
+        )
+        # A straight line is a stricter path than any-path; some arms (the Z1 folds its wrist into its upper arm)
+        # cannot take it here, and must say why in geometric terms.
+        assert down["ok"] is True or down["refusal"]["code"] in {"COLLISION", "TABLE_CLEARANCE", "UNREACHABLE"}
     assert executor.rest()["ok"] is True
+
+
+def test_grippers_configured() -> None:
+    with_gripper = {p for p in presets() if load(p).gripper is not None}
+    assert with_gripper == {"panda", "so_arm100", "so_arm101", "low_cost_robot_arm", "piper", "yam"}
 
 
 @pytest.mark.parametrize(("preset", "xy"), [("ur5e", (400, 150)), ("panda", (450, 100))])

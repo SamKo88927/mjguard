@@ -281,16 +281,22 @@ class Executor:
             **({"refusal": refusal.to_dict()} if refusal is not None else {}),
         }
 
-    def move_to(self, x_mm: float, y_mm: float, z_mm: float, tool_down: bool = True, speed: float = 0.5) -> Result:
+    def move_to(
+        self, x_mm: float, y_mm: float, z_mm: float, tool_down: bool = True, speed: float = 0.5, path: str = "joint"
+    ) -> Result:
         floor = self.guard.model.floor_z
         target = np.array([x_mm / 1000, y_mm / 1000, floor + z_mm / 1000])
         direction = np.array([0.0, 0.0, -1.0]) if tool_down else None
-        args = {"x_mm": x_mm, "y_mm": y_mm, "z_mm": z_mm, "tool_down": tool_down, "speed": speed}
+        args = {"x_mm": x_mm, "y_mm": y_mm, "z_mm": z_mm, "tool_down": tool_down, "speed": speed, "path": path}
+        if path not in ("joint", "line"):
+            result: Result = {"ok": False, "refusal": Refusal("BAD_TARGET", "path must be 'joint' or 'line'").to_dict()}
+            self.trace.record("move_to", args, result)
+            return result
         return self._run(
             "move_to",
             args,
             speed,
-            lambda q, g: (self.guard.plan_pose_with_fallback(q, target, direction, g), None),
+            lambda q, g: (self.guard.plan_pose_with_fallback(q, target, direction, g, path == "line"), None),
         )
 
     def move_joints(self, joints: dict[str, float], speed: float = 0.5) -> Result:

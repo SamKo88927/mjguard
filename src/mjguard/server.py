@@ -69,9 +69,13 @@ def create_server(
         z_mm: Annotated[Mm, Field(description="Height of the tool point above the floor or table.")],
         tool_down: Annotated[bool, Field(description="Point the tool straight down (true) or any direction.")] = True,
         speed: Speed = 0.5,
+        path: Annotated[
+            Literal["joint", "line"],
+            Field(description="'joint': any checked path (default). 'line': the tool travels a straight line."),
+        ] = "joint",
     ) -> CallToolResult:
         """Move the tool point to (x, y, z). Returns when the motion ends or is refused."""
-        return await in_thread(lambda: executor.move_to(x_mm, y_mm, z_mm, tool_down, speed))
+        return await in_thread(lambda: executor.move_to(x_mm, y_mm, z_mm, tool_down, speed, path))
 
     @server.tool(annotations=act)
     async def move_joints(

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 (2026-11-25)
+
+- Obstacles: boxes, cylinders and spheres in the config are added to the model; plans keep `obstacle_clearance_mm`
+  from them (`OBSTACLE_CLEARANCE`), touching one is a `COLLISION`, and touching one at rest is never allowed.
+- Straight-line moves: `move_to(..., path="line")`, sampled every 5 mm, IK solved point to point; singularities and
+  reach limits along the line are refused. Suggestions carry the `path` they were checked with.
+- Grippers for SO-ARM100, SO-ARM101, low-cost arm, PiPER and YAM; CI opens and closes each under physics.
+- Finger-to-finger contact is not a collision; fingers against the arm, table and obstacles still are.
+
 ## 0.2.0 (2026-11-25)
 
 - Eleven more Menagerie presets: SO-ARM100, SO-ARM101, low-cost robot arm, PiPER, YAM, Z1, xArm7, Gen3, iiwa 14, FR3,

@@ -37,6 +37,7 @@ Every motion is planned into joint-space waypoints, and **every waypoint** is ch
 | Joint ranges from the model, minus a margin | `JOINT_LIMIT` |
 | Contacts between moving links and the rest of the scene, from MuJoCo's own collision pipeline | `COLLISION`, `TABLE_COLLISION` |
 | Distance from every moving collision geom (meshes included) and the tool point to the floor or table, with a planning margin above the hard limit | `TABLE_CLEARANCE` |
+| Distance from every moving collision geom to every obstacle in the config | `OBSTACLE_CLEARANCE`, `COLLISION` |
 | An optional workspace box for the tool point | `WORKSPACE` |
 | IK convergence: a miss beyond 1 mm or 1.5° is a refusal, never a "close enough" plan | `UNREACHABLE` |
 
@@ -78,7 +79,7 @@ one out of reach, stay above the hard clearance limit, follow the suggestion.
 | `z1` (Unitree) | `xarm7` (UFACTORY) |
 
 Each preset's planning margin covers the tracking error its model's servos show in simulation (10 mm for most,
-40 mm for the Z1). Grippers are configured for the Panda only so far.
+40 mm for the Z1). Grippers are configured for the Panda, SO-ARM100, SO-ARM101, low-cost arm, PiPER and YAM.
 
 ## Your own robot
 
@@ -102,6 +103,21 @@ actuators = ["a1", "a2", "a3", "a4", "a5", "a6"]   # position servos: simulate w
 min_clearance_mm = 20       # hard limit, enforced on the measured arm
 planning_margin_mm = 10     # plans keep 30 mm
 workspace_mm = { x = [-600, 600], y = [-600, 600] }
+obstacle_clearance_mm = 10
+
+[gripper]                   # optional
+joints = ["finger_left", "finger_right"]
+closed = [0.0, 0.0]
+open = [0.04, -0.04]
+actuator = "gripper"        # optional: drive it in physics
+ctrl_closed = 0.0
+ctrl_open = 0.04
+
+[[obstacles]]               # boxes, cylinders and spheres on the table; millimetres, z = height of the centre
+name = "parts_bin"
+shape = "box"
+size_mm = [120, 160, 140]   # box: x, y, z; cylinder: diameter, height; sphere: diameter
+center_mm = [300, 0, 70]
 ```
 
 ```sh
@@ -112,8 +128,9 @@ mjguard serve robot.toml     # MCP over stdio
 Two kinds of contact are part of a model's design rather than a collision, and mjguard treats them that way:
 contacts the model already has in its rest pose (Kinova Gen3's base and shoulder hulls overlap; closed fingers touch;
 a UR shoulder sits on the floor) are allowed up to the depth they have at rest, and `mjguard check` lists them; and
-bodies moved by exactly the same commanded joints (two fingers of a gripper you did not configure) cannot collide
-because of anything you command.
+bodies whose relative pose depends only on gripper joints (two fingers) are not checked against each other. Fingers
+against the arm, the table and obstacles are. Contacts with a configured obstacle are never allowed, at rest or
+otherwise.
 
 Links whose moving joints all spin about a vertical axis (a turret on its base) cannot change height, so they are
 exempt from the clearance check; they are still collision-checked.
@@ -126,8 +143,12 @@ claude mcp add ur5e -- uvx mjguard serve ur5e
 
 ## Tools
 
-`get_state`, `get_limits`, `move_to(x_mm, y_mm, z_mm, tool_down=true, speed)`, `move_joints({name: value})`,
-`gripper(opening)` (when configured), `rest`, `stop`. Resources: `mjguard://limits`, `mjguard://trace/latest`.
+`get_state`, `get_limits`, `move_to(x_mm, y_mm, z_mm, tool_down=true, speed, path="joint")`,
+`move_joints({name: value})`, `gripper(opening)` (when configured), `rest`, `stop`.
+
+`path="line"` makes the tool point travel a straight line, sampled every 5 mm, with IK solved point to point so the
+arm cannot flip configuration mid-way; a line that crosses a singularity or leaves reach is refused, and a refusal's
+suggestion says which `path` it was checked with. Resources: `mjguard://limits`, `mjguard://trace/latest`.
 Millimetres and degrees; z is the height above the floor plane.
 
 ## Real hardware

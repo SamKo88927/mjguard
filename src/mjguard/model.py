@@ -36,10 +36,13 @@ def _name(m: Any, kind: Any, i: int) -> str:
     return mj.mj_id2name(m, kind, i) or f"#{i}"
 
 
+OBSTACLE_PREFIX = "mjguard_obstacle:"
+
+
 class ArmModel:
     def __init__(self, config: RobotConfig) -> None:
         self.config = config
-        self.m = mj.MjModel.from_xml_path(str(config.mjcf))
+        self.m = self._compile(config)
         self.d = mj.MjData(self.m)
         m = self.m
 
@@ -60,6 +63,9 @@ class ArmModel:
         if int(m.geom_type[self.floor]) != int(mj.mjtGeom.mjGEOM_PLANE):
             raise ConfigError(f"floor geom {config.floor_geom!r} must be a plane")
         self.floor_z = float(m.geom_pos[self.floor][2])
+        self.obstacle_geoms = [
+            g for g in range(m.ngeom) if (mj.mj_id2name(m, mj.mjtObj.mjOBJ_GEOM, g) or "").startswith(OBSTACLE_PREFIX)
+        ]
         self.site = lookup(mj.mjtObj.mjOBJ_SITE, config.tcp_site, "site") if config.tcp_site else -1
         self.body = lookup(mj.mjtObj.mjOBJ_BODY, config.tcp_body, "body") if config.tcp_body else -1
         self.offset = np.array(config.tcp_offset_m, dtype=float)
@@ -134,9 +140,8 @@ class ArmModel:
 
         self.clearance_geoms = [g for g in self.moving_geoms if not height_fixed(int(m.geom_bodyid[g]))]
 
-        # Two bodies moved by exactly the same commanded joints keep their relative pose whatever we command (two
-        # fingers of an unconfigured gripper, say). Their contact cannot be caused or cured by a motion, so it is
-        # not a motion's collision.
+        # Two bodies moved by exactly the same arm joints keep their relative pose whatever the arm does (two fingers
+        # of a gripper, say). Their contact cannot be caused or cured by an arm motion, so it is not a collision.
         def chain(body: int) -> frozenset[int]:
             found: set[int] = set()
             k = body
@@ -145,15 +150,21 @@ class ArmModel:
                 k = int(m.body_parentid[k])
             return frozenset(found)
 
-        self._chain = [chain(b) for b in range(m.nbody)]
+        # Fingers move against each other by design: bodies whose relative pose depends only on gripper joints are
+        # not checked against each other either. Fingers against the arm, the table or obstacles still are.
+        gripper_joints = moving_joints - set(self.joint_ids)
+        self._chain = [chain(b) - gripper_joints for b in range(m.nbody)]
 
         # Contacts the model already has in its rest pose are part of its design: collision hulls of a turret that
         # overlap its base, closed fingers that touch, a shoulder that sits on the floor. They are allowed up to the
         # depth they have at rest (plus a small tolerance); anything deeper, or any other pair, is a collision.
         # `mjguard check` lists them so they stay visible.
         self.rest_contacts: dict[frozenset[int], float] = {}
+        obstacles = set(self.obstacle_geoms)
         for c in self._raw_contacts(self.home, self.home_gripper):
-            key = frozenset((int(m.geom_bodyid[c.geom1]), int(m.geom_bodyid[c.geom2])))
+            if c.geom1 in obstacles or c.geom2 in obstacles:
+                continue  # touching an obstacle at rest is a config error, not a design feature
+            key = self._pair(c.geom1, c.geom2)
             self.rest_contacts[key] = max(self.rest_contacts.get(key, 0.0), -float(c.dist))
 
     def _raw_contacts(self, q: Sequence[float] | Vec, gripper: Sequence[float] | Vec | None) -> list[Any]:
@@ -168,14 +179,73 @@ class ArmModel:
             and self._chain[int(self.m.geom_bodyid[c.geom1])] != self._chain[int(self.m.geom_bodyid[c.geom2])]
         ]
 
+    def _pair(self, g1: int, g2: int) -> frozenset[int]:
+        """Contact identity: the body for arm parts, the geom itself (negative id) for static scene geoms."""
+
+        def key(g: int) -> int:
+            body = int(self.m.geom_bodyid[g])
+            return body if body > 0 else -(g + 1)
+
+        return frozenset((key(g1), key(g2)))
+
+    def _pair_label(self, k: int) -> str:
+        return self.geom_label(-k - 1) if k < 0 else _name(self.m, mj.mjtObj.mjOBJ_BODY, k)
+
     def describe_rest_contacts(self) -> list[dict[str, Any]]:
         return [
-            {
-                "bodies": sorted(_name(self.m, mj.mjtObj.mjOBJ_BODY, b) for b in pair),
-                "depth_mm_at_rest": round(depth * 1000, 1),
-            }
+            {"bodies": sorted(self._pair_label(k) for k in pair), "depth_mm_at_rest": round(depth * 1000, 1)}
             for pair, depth in self.rest_contacts.items()
         ]
+
+    @staticmethod
+    def _compile(config: RobotConfig) -> Any:
+        if not config.obstacles:
+            return mj.MjModel.from_xml_path(str(config.mjcf))
+        spec = mj.MjSpec.from_file(str(config.mjcf))
+        floor_z = 0.0
+        for g in spec.geoms:
+            if g.name == config.floor_geom:
+                floor_z = float(g.pos[2])
+        for o in config.obstacles:
+            geom = spec.worldbody.add_geom()
+            geom.name = OBSTACLE_PREFIX + o.name
+            size = [v / 1000 for v in o.size_mm]
+            if o.shape == "box":
+                geom.type, geom.size = mj.mjtGeom.mjGEOM_BOX, [size[0] / 2, size[1] / 2, size[2] / 2]
+            elif o.shape == "cylinder":
+                geom.type, geom.size = mj.mjtGeom.mjGEOM_CYLINDER, [size[0] / 2, size[1] / 2, 0]
+            else:
+                geom.type, geom.size = mj.mjtGeom.mjGEOM_SPHERE, [size[0] / 2, 0, 0]
+            x, y, z = (v / 1000 for v in o.center_mm)
+            geom.pos = [x, y, floor_z + z]
+            geom.rgba = [0.95, 0.55, 0.2, 0.55]
+            geom.contype, geom.conaffinity = 1, 1
+        return spec.compile()
+
+    def geom_label(self, g: int) -> str:
+        """Body name for arm parts; `obstacle 'name'` for configured obstacles; geom name for other scene geoms."""
+        name = mj.mj_id2name(self.m, mj.mjtObj.mjOBJ_GEOM, g) or ""
+        if name.startswith(OBSTACLE_PREFIX):
+            return f"obstacle '{name.removeprefix(OBSTACLE_PREFIX)}'"
+        body = int(self.m.geom_bodyid[g])
+        if body == 0 and name:
+            return name
+        return _name(self.m, mj.mjtObj.mjOBJ_BODY, body)
+
+    def obstacle_clearance(
+        self, q: Sequence[float] | Vec, gripper: Sequence[float] | Vec | None = None
+    ) -> tuple[float, str, str]:
+        """(mm, arm part, obstacle) for the closest pair; (inf, "", "") without obstacles."""
+        best = (float("inf"), "", "")
+        if not self.obstacle_geoms:
+            return best
+        self.set(q, gripper)
+        for g in self.moving_geoms:
+            for o in self.obstacle_geoms:
+                dist = float(mj.mj_geomDistance(self.m, self.d, g, o, 0.5, self._ft)) * 1000
+                if dist < best[0]:
+                    best = (dist, self.geom_label(g), self.geom_label(o))
+        return best
 
     @property
     def n(self) -> int:
@@ -207,14 +277,13 @@ class ArmModel:
         """Penetrating contacts that involve at least one moving geom."""
         out: list[Contact] = []
         for c in self._raw_contacts(q, gripper):
-            b1, b2 = int(self.m.geom_bodyid[c.geom1]), int(self.m.geom_bodyid[c.geom2])
-            allowed = self.rest_contacts.get(frozenset((b1, b2)))
+            allowed = self.rest_contacts.get(self._pair(c.geom1, c.geom2))
             if allowed is not None and -float(c.dist) <= allowed + REST_CONTACT_TOLERANCE_M:
                 continue
             out.append(
                 Contact(
-                    _name(self.m, mj.mjtObj.mjOBJ_BODY, int(self.m.geom_bodyid[c.geom1])),
-                    _name(self.m, mj.mjtObj.mjOBJ_BODY, int(self.m.geom_bodyid[c.geom2])),
+                    self.geom_label(c.geom1),
+                    self.geom_label(c.geom2),
                     round(-float(c.dist) * 1000, 1),
                     self.floor in (c.geom1, c.geom2),
                 )

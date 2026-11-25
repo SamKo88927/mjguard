@@ -21,12 +21,15 @@ uvx mjguard serve panda    # MCP over stdio; or ur5e, or your own robot.toml
 ```
 
 <p align="center">
-  <img src="docs/media/demo.gif" alt="A simulated Franka Panda moves to a checked target; a move into the table and an out-of-reach move are refused with a suggested safe point, and the arm then follows the suggestion" width="576">
+  <img src="docs/media/demo.gif" alt="A simulated Franka Panda refuses a move into a parts bin, follows the suggested safe point, descends in a straight line, grasps, lifts, and refuses a move into the table" width="576">
 </p>
 
-<sub>Franka Panda from MuJoCo Menagerie, driven through the same executor and guard the MCP server uses
-(`scripts/record_demo.py`). A target into the table and one out of reach are refused; the refusal carries the
-farthest checked-safe point, and the next call follows it.</sub>
+<sub>Franka Panda from MuJoCo Menagerie with a parts bin configured as an obstacle, driven through the same executor
+and guard the MCP server uses (`scripts/record_demo.py`). A move into the bin is refused and its suggestion followed;
+then a straight-line descent, a grasp, a straight-line lift, and a refused move into the table.</sub>
+
+Why the check has to live below the model, and the bugs this project's own tests found:
+[docs/why-below-the-model.md](docs/why-below-the-model.md).
 
 ## What it checks
 

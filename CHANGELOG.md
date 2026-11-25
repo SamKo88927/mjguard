@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 (2026-11-25)
+
+- Fix: an arm that settled inside the planning margin (servo sag after a move planned right at the margin) could not
+  move at all, not even away. A plan that starts inside the margin may now move as long as no waypoint gets closer
+  than the start; the hard limit and contacts are never relaxed. Found while recording the demo; regression test
+  fails without the fix.
+- README demo: parts bin as an obstacle, straight-line descent and grasp.
+- docs/why-below-the-model.md.
+
 ## 0.3.0 (2026-11-25)
 
 - Obstacles: boxes, cylinders and spheres in the config are added to the model; plans keep `obstacle_clearance_mm`

@@ -49,6 +49,7 @@ class Plan:
 
 
 LINE_STEP_M = 0.005
+RELAX_TOLERANCE_MM = 0.5
 
 
 def _mm(v: float) -> float:
@@ -88,7 +89,28 @@ class Guard:
                 )
         return None
 
-    def check_configuration(self, q: Vec, gripper: Vec | None = None) -> tuple[Refusal | None, float]:
+    def thresholds(self, start: Vec, gripper: Vec | None = None) -> tuple[float, float]:
+        """Clearance a plan must keep from the floor and from obstacles, given where the arm starts.
+
+        Normally the planning values. If the measured arm already sits inside the planning margin (servo sag or
+        tracking error after a move that was planned right at the margin), a plan may not get any closer than where
+        it starts, but it may move: otherwise every motion, including moving away, would be refused and the arm
+        would be stuck. The hard floor limit and contacts are never relaxed.
+        """
+        floor = self.limits.planning_clearance_mm
+        start_clearance = self.model.clearance_mm(start, gripper)
+        if start_clearance < floor:
+            floor = max(self.limits.min_clearance_mm, start_clearance - RELAX_TOLERANCE_MM)
+        obstacle = self.limits.obstacle_clearance_mm
+        start_gap = self.model.obstacle_clearance(start, gripper)[0]
+        if start_gap < obstacle:
+            obstacle = max(0.0, start_gap - RELAX_TOLERANCE_MM)
+        return floor, obstacle
+
+    def check_configuration(
+        self, q: Vec, gripper: Vec | None = None, thresholds: tuple[float, float] | None = None
+    ) -> tuple[Refusal | None, float]:
+        floor_mm, obstacle_mm = thresholds or (self.limits.planning_clearance_mm, self.limits.obstacle_clearance_mm)
         refusal = self.check_joints(q)
         if refusal is not None:
             return refusal, math.nan
@@ -98,23 +120,21 @@ class Guard:
                 return Refusal("TABLE_COLLISION", f"{part} would touch the floor"), 0.0
             return Refusal("COLLISION", f"{c.a} would touch {c.b} ({c.depth_mm} mm deep)", {"a": c.a, "b": c.b}), 0.0
         clearance = self.model.clearance_mm(q, gripper)
-        if clearance < self.limits.planning_clearance_mm:
+        if clearance < floor_mm:
             return (
                 Refusal(
                     "TABLE_CLEARANCE",
-                    f"a moving part would be {clearance:.1f} mm above the floor; plans keep at least "
-                    f"{self.limits.planning_clearance_mm:g} mm",
+                    f"a moving part would be {clearance:.1f} mm above the floor; plans keep at least {floor_mm:.4g} mm",
                     {"clearance_mm": round(clearance, 1)},
                 ),
                 clearance,
             )
         gap, part, obstacle = self.model.obstacle_clearance(q, gripper)
-        if gap < self.limits.obstacle_clearance_mm:
+        if gap < obstacle_mm:
             return (
                 Refusal(
                     "OBSTACLE_CLEARANCE",
-                    f"{part} would be {max(gap, 0):.1f} mm from {obstacle}; plans keep at least "
-                    f"{self.limits.obstacle_clearance_mm:g} mm",
+                    f"{part} would be {max(gap, 0):.1f} mm from {obstacle}; plans keep at least {obstacle_mm:.4g} mm",
                     {"part": part, "obstacle": obstacle, "gap_mm": round(max(gap, 0), 1)},
                 ),
                 clearance,
@@ -142,9 +162,10 @@ class Guard:
         if refusal is not None:
             return refusal
         lowest = math.inf
+        limits = self.thresholds(np.asarray(start, float), gripper)
         waypoints = interpolate(np.asarray(start, float), np.asarray(goal, float), float(np.min(self.max_step)))
         for i, q in enumerate(waypoints):
-            refusal, clearance = self.check_configuration(q, gripper)
+            refusal, clearance = self.check_configuration(q, gripper, limits)
             if refusal is not None:
                 refusal.details["waypoint"] = f"{i + 1}/{len(waypoints)}"
                 return refusal
@@ -241,8 +262,9 @@ class Guard:
         for a, b in itertools.pairwise(sampled):
             waypoints += interpolate(a, b, float(np.min(self.max_step)))
         lowest = math.inf
+        limits = self.thresholds(current, gripper)
         for i, w in enumerate(waypoints):
-            refusal, clearance = self.check_configuration(w, gripper)
+            refusal, clearance = self.check_configuration(w, gripper, limits)
             if refusal is not None:
                 refusal.details["waypoint"] = f"{i + 1}/{len(waypoints)}"
                 return refusal

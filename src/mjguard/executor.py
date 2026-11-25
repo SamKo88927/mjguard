@@ -329,8 +329,9 @@ class Executor:
                 return Refusal("BAD_TARGET", "opening must be between 0 (closed) and 1 (open)"), None
             goal = np.array(cfg.closed) + (np.array(cfg.open) - np.array(cfg.closed)) * opening
             steps = max(2, int(np.ceil(np.max(np.abs(goal - g)) / 0.01)))
+            limits = self.guard.thresholds(q, g)
             for i in range(1, steps + 1):
-                refusal, _ = self.guard.check_configuration(q, g + (goal - g) * (i / steps))
+                refusal, _ = self.guard.check_configuration(q, g + (goal - g) * (i / steps), limits)
                 if refusal is not None:
                     return refusal, None
             return Plan([q.copy() for _ in range(steps)], self.guard.model.clearance_mm(q, goal)), goal

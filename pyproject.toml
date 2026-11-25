@@ -1,6 +1,6 @@
 [project]
 name = "mjguard"
-version = "0.3.0"
+version = "0.3.1"
 description = "Let LLM agents drive any MuJoCo-modelled robot arm over MCP, with every motion checked in the model before it runs."
 readme = "README.md"
 license = "Apache-2.0"

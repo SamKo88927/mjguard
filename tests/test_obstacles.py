@@ -66,3 +66,32 @@ def test_touching_an_obstacle_at_rest_is_not_allowed_as_a_design_contact() -> No
     refusal, _ = ex.guard.check_configuration(ex.guard.model.home, ex.guard.model.home_gripper)
     assert refusal is not None and "wall" in refusal.message
     assert ex.guard.model.describe_rest_contacts() == []
+
+
+def test_arm_that_settled_inside_the_margin_can_move_away_but_not_closer() -> None:
+    """Servo sag can leave the measured arm inside the planning margin. It must not be stuck there."""
+    import numpy as np
+
+    config = with_obstacles(BIN)
+    transport = SimTransport(config)
+    ex = Executor(config, transport)
+    assert ex.move_to(300, 0, 260)["ok"] is True
+    model = ex.guard.model
+    q, g = transport.read()
+    for z_mm in range(258, 140, -2):  # lower the tool, unchecked, until it sits inside the 10 mm margin
+        target = np.array([0.3, 0.0, model.floor_z + z_mm / 1000])
+        q, _, _ = model.solve_ik(target, np.array([0.0, 0.0, -1.0]), q, ex.guard.lower, ex.guard.upper)
+        gap = model.obstacle_clearance(q, g)[0]
+        if 1 < gap < 4:
+            break
+    else:
+        raise AssertionError("could not place the arm inside the margin")
+    transport.d.qpos[model.qadr] = q
+    import mujoco
+
+    mujoco.mj_forward(transport.m, transport.d)
+    closer = ex.move_to(300, 0, 140)
+    assert closer["refusal"]["code"] in {"OBSTACLE_CLEARANCE", "COLLISION"}
+    # Straight up in 5 mm steps: the first steps are still inside the margin, but each is farther than the start.
+    away = ex.move_to(300, 0, 320, path="line")
+    assert away["ok"] is True, away.get("refusal")

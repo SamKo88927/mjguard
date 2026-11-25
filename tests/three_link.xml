@@ -1,0 +1,51 @@
+<!-- A 4-joint test arm built from primitives: base yaw, shoulder, elbow, wrist pitch. Tool site at the tip. -->
+<mujoco model="three_link">
+  <option timestep="0.002"/>
+  <default>
+    <joint damping="2" armature="0.05"/>
+    <position kp="80" kv="6"/>
+  </default>
+  <worldbody>
+    <geom name="floor" type="plane" size="1 1 0.1"/>
+    <body name="base" pos="0 0 0.05">
+      <geom type="cylinder" size="0.06 0.05"/>
+      <body name="turret" pos="0 0 0.05">
+        <joint name="yaw" axis="0 0 1" range="-170 170"/>
+        <geom type="cylinder" size="0.045 0.03" pos="0 0 0.03"/>
+        <body name="upper" pos="0 0 0.08">
+          <joint name="shoulder" axis="0 1 0" range="-100 100"/>
+          <geom type="capsule" fromto="0 0 0 0 0 0.25" size="0.03"/>
+          <body name="fore" pos="0 0 0.25">
+            <joint name="elbow" axis="0 1 0" range="-150 150"/>
+            <geom type="capsule" fromto="0 0 0 0 0 0.22" size="0.025"/>
+            <body name="hand" pos="0 0 0.22">
+              <joint name="wrist" axis="0 1 0" range="-120 120"/>
+              <geom type="box" size="0.02 0.02 0.04" pos="0 0 0.04"/>
+              <site name="tcp" pos="0 0 0.1"/>
+              <body name="finger" pos="0.02 0 0.08">
+                <joint name="grip" type="slide" axis="1 0 0" range="0 0.03"/>
+                <geom type="box" size="0.005 0.01 0.02"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <contact>
+    <exclude body1="base" body2="turret"/>
+    <exclude body1="turret" body2="upper"/>
+    <exclude body1="upper" body2="fore"/>
+    <exclude body1="fore" body2="hand"/>
+    <exclude body1="hand" body2="finger"/>
+  </contact>
+  <actuator>
+    <position name="a_yaw" joint="yaw" ctrlrange="-3 3"/>
+    <position name="a_shoulder" joint="shoulder" ctrlrange="-2 2"/>
+    <position name="a_elbow" joint="elbow" ctrlrange="-3 3"/>
+    <position name="a_wrist" joint="wrist" ctrlrange="-2.2 2.2"/>
+  </actuator>
+  <keyframe>
+    <key name="home" qpos="0 0.3 1.2 1.2 0.03" ctrl="0 0.3 1.2 1.2"/>
+  </keyframe>
+</mujoco>

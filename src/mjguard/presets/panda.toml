@@ -1,0 +1,26 @@
+# Franka Emika Panda from MuJoCo Menagerie. Needs: pip install 'mjguard[menagerie]'
+name = "panda"
+
+[model]
+mjcf = "menagerie:panda"
+floor_geom = "floor"
+keyframe = "home"
+
+[arm]
+joints = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
+tcp_body = "hand"
+tcp_offset_m = [0.0, 0.0, 0.1034]
+tool_axis = "z"
+actuators = ["actuator1", "actuator2", "actuator3", "actuator4", "actuator5", "actuator6", "actuator7"]
+
+[gripper]
+joints = ["finger_joint1", "finger_joint2"]
+closed = [0.0, 0.0]
+open = [0.04, 0.04]
+actuator = "actuator8"
+ctrl_closed = 0
+ctrl_open = 255
+
+[limits]
+min_clearance_mm = 30
+max_joint_speed_dps = 45

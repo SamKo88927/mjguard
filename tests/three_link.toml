@@ -1,0 +1,20 @@
+name = "three_link"
+
+[model]
+mjcf = "three_link.xml"
+floor_geom = "floor"
+keyframe = "home"
+
+[arm]
+joints = ["yaw", "shoulder", "elbow", "wrist"]
+tcp_site = "tcp"
+tool_axis = "z"
+
+[gripper]
+joints = ["grip"]
+closed = [0.0]
+open = [0.03]
+
+[limits]
+min_clearance_mm = 20
+workspace_mm = { x = [-600, 600], y = [-600, 600] }

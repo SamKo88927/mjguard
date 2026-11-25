@@ -1,0 +1,19 @@
+# Kinova Gen3 from MuJoCo Menagerie (downloaded on first use).
+# Tool axis: the last joint's axis, pointing away from the wrist. Planning margin covers the tracking error
+# measured with the model's own servos under gravity.
+name = "gen3"
+
+[model]
+mjcf = "menagerie:gen3"
+floor_geom = "floor"
+keyframe = "home"
+
+[arm]
+joints = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"]
+tcp_site = "pinch_site"
+tool_axis = "z"
+actuators = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"]
+
+[limits]
+min_clearance_mm = 20
+planning_margin_mm = 10

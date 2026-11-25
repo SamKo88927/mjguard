@@ -1,0 +1,19 @@
+# I2RT YAM from MuJoCo Menagerie (downloaded on first use).
+# Tool axis: the last joint's axis, pointing away from the wrist. Planning margin covers the tracking error
+# measured with the model's own servos under gravity.
+name = "yam"
+
+[model]
+mjcf = "menagerie:yam"
+floor_geom = "floor"
+keyframe = "home"
+
+[arm]
+joints = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+tcp_site = "tcp_site"
+tool_axis = "z"
+actuators = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+
+[limits]
+min_clearance_mm = 20
+planning_margin_mm = 10

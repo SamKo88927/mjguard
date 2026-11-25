@@ -21,6 +21,7 @@ mj: Any = _mujoco
 Vec = NDArray[np.float64]
 
 _AXES = {"x": 0, "y": 1, "z": 2}
+REST_CONTACT_TOLERANCE_M = 0.002
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,49 @@ class ArmModel:
 
         self.clearance_geoms = [g for g in self.moving_geoms if not height_fixed(int(m.geom_bodyid[g]))]
 
+        # Two bodies moved by exactly the same commanded joints keep their relative pose whatever we command (two
+        # fingers of an unconfigured gripper, say). Their contact cannot be caused or cured by a motion, so it is
+        # not a motion's collision.
+        def chain(body: int) -> frozenset[int]:
+            found: set[int] = set()
+            k = body
+            while k > 0:
+                found |= {j for j in range(m.body_jntadr[k], m.body_jntadr[k] + m.body_jntnum[k]) if j in moving_joints}
+                k = int(m.body_parentid[k])
+            return frozenset(found)
+
+        self._chain = [chain(b) for b in range(m.nbody)]
+
+        # Contacts the model already has in its rest pose are part of its design: collision hulls of a turret that
+        # overlap its base, closed fingers that touch, a shoulder that sits on the floor. They are allowed up to the
+        # depth they have at rest (plus a small tolerance); anything deeper, or any other pair, is a collision.
+        # `mjguard check` lists them so they stay visible.
+        self.rest_contacts: dict[frozenset[int], float] = {}
+        for c in self._raw_contacts(self.home, self.home_gripper):
+            key = frozenset((int(m.geom_bodyid[c.geom1]), int(m.geom_bodyid[c.geom2])))
+            self.rest_contacts[key] = max(self.rest_contacts.get(key, 0.0), -float(c.dist))
+
+    def _raw_contacts(self, q: Sequence[float] | Vec, gripper: Sequence[float] | Vec | None) -> list[Any]:
+        self.set(q, gripper)
+        mj.mj_collision(self.m, self.d)
+        moving = set(self.moving_geoms)
+        return [
+            c
+            for c in self.d.contact[: self.d.ncon]
+            if c.dist < 0
+            and (c.geom1 in moving or c.geom2 in moving)
+            and self._chain[int(self.m.geom_bodyid[c.geom1])] != self._chain[int(self.m.geom_bodyid[c.geom2])]
+        ]
+
+    def describe_rest_contacts(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "bodies": sorted(_name(self.m, mj.mjtObj.mjOBJ_BODY, b) for b in pair),
+                "depth_mm_at_rest": round(depth * 1000, 1),
+            }
+            for pair, depth in self.rest_contacts.items()
+        ]
+
     @property
     def n(self) -> int:
         return len(self.joint_ids)
@@ -161,12 +205,11 @@ class ArmModel:
     # ------------------------------------------------------------------ geometry
     def contacts(self, q: Sequence[float] | Vec, gripper: Sequence[float] | Vec | None = None) -> list[Contact]:
         """Penetrating contacts that involve at least one moving geom."""
-        self.set(q, gripper)
-        mj.mj_collision(self.m, self.d)
         out: list[Contact] = []
-        moving = set(self.moving_geoms)
-        for c in self.d.contact[: self.d.ncon]:
-            if c.dist >= 0 or not (c.geom1 in moving or c.geom2 in moving):
+        for c in self._raw_contacts(q, gripper):
+            b1, b2 = int(self.m.geom_bodyid[c.geom1]), int(self.m.geom_bodyid[c.geom2])
+            allowed = self.rest_contacts.get(frozenset((b1, b2)))
+            if allowed is not None and -float(c.dist) <= allowed + REST_CONTACT_TOLERANCE_M:
                 continue
             out.append(
                 Contact(

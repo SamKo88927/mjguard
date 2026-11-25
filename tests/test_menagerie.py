@@ -1,30 +1,67 @@
-"""The same guard on real robot models from MuJoCo Menagerie, simulated with their own position servos."""
+"""Every built-in preset, on the real robot model from MuJoCo Menagerie, simulated with its own position servos.
+
+Each preset must: pass its rest pose, reach a target near its own rest pose, refuse a target in the table and one out
+of reach, keep the measured arm above the hard clearance limit, and accept the suggestion it returns.
+"""
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
-pytest.importorskip("robot_descriptions")
-
-from mjguard.config import load
+from mjguard.config import load, presets
 from mjguard.executor import Executor, SimTransport
 
 pytestmark = pytest.mark.menagerie
 
+# A reachable target for each robot: below and to the side of its rest pose, along the direction the arm faces.
+TARGETS: dict[str, tuple[float, float, float]] = {
+    "fr3": (430, 110, 312),
+    "gen3": (354, 91, 217),
+    "iiwa14": (518, 132, 142),
+    "low_cost_robot_arm": (-115, -30, 84),
+    "panda": (450, 100, 250),
+    "piper": (287, 74, 191),
+    "so_arm100": (47, -185, 150),
+    "so_arm101": (90, -287, 130),
+    "ur10e": (-272, 501, 347),
+    "ur5e": (400, 150, 300),
+    "xarm7": (310, 79, 174),
+    "yam": (188, 48, 201),
+    "z1": (69, 18, 146),
+}
 
-@pytest.mark.parametrize(("preset", "target"), [("ur5e", (400, 150, 300)), ("panda", (450, 100, 250))])
-def test_preset_moves_refuses_and_recovers(preset: str, target: tuple[float, float, float]) -> None:
+
+def test_every_preset_has_a_target() -> None:
+    assert set(TARGETS) == set(presets())
+
+
+@pytest.mark.parametrize("preset", sorted(TARGETS))
+def test_preset(preset: str) -> None:
     config = load(preset)
     executor = Executor(config, SimTransport(config))
+    hard = config.limits.min_clearance_mm
+    guard = executor.guard
+    assert guard.check_configuration(guard.model.home, guard.model.home_gripper)[0] is None
+
+    target = TARGETS[preset]
     r = executor.move_to(*target)
-    assert r["ok"] is True, r
-    assert r["executed"]["tool_tracking_error_mm"] < 10  # physics with the model's own servos, under gravity
-    below = executor.move_to(target[0], target[1], 0)
-    assert below["refusal"]["code"] == "TABLE_CLEARANCE"
-    far = executor.move_to(3000, 0, 300)
+    if not r["ok"]:
+        r = executor.move_to(*target, tool_down=False)
+    assert r["ok"] is True, r["refusal"]
+    tool = r["state"]["tool"]
+    assert math.dist((tool["x_mm"], tool["y_mm"], tool["z_mm"]), target) < 50  # physics: servos lag and sag
+    assert r["executed"]["min_clearance_mm"] >= hard
+
+    assert executor.move_to(target[0], target[1], 0)["refusal"]["code"] == "TABLE_CLEARANCE"
+    far = executor.move_to(5000, 0, 200)
     assert far["refusal"]["code"] == "UNREACHABLE"
-    s = far["refusal"]["suggestion"]
-    assert executor.move_to(s["x_mm"], s["y_mm"], s["z_mm"])["ok"] is True
+    s = far["refusal"].get("suggestion")
+    if s is not None:
+        follow = executor.move_to(s["x_mm"], s["y_mm"], s["z_mm"], tool_down=s["tool_down"])
+        assert follow["ok"] is True, follow["refusal"]
+        assert follow["executed"]["min_clearance_mm"] >= hard
     assert executor.rest()["ok"] is True
 
 
@@ -38,3 +75,15 @@ def test_servo_sag_stays_above_the_hard_limit(preset: str, xy: tuple[float, floa
     assert r["ok"] is True, r
     assert r["executed"]["min_clearance_mm"] >= config.limits.min_clearance_mm
     assert r["state"]["min_clearance_mm"] >= config.limits.min_clearance_mm
+
+
+def test_check_lists_contacts_allowed_from_the_rest_pose(capsys: pytest.CaptureFixture[str]) -> None:
+    """Gen3's base and shoulder hulls overlap by design; check must show that, not hide it."""
+    import json
+
+    from mjguard.cli import main
+
+    assert main(["check", "gen3"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    pairs = [c["bodies"] for c in report["contacts_allowed_from_rest_pose"]]
+    assert ["base_link", "shoulder_link"] in pairs

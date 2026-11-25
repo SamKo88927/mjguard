@@ -1,0 +1,19 @@
+# Low-cost robot arm (Alexander Koch design) from MuJoCo Menagerie (downloaded on first use).
+# Tool axis: the last joint's axis, pointing away from the wrist. Planning margin covers the tracking error
+# measured with the model's own servos under gravity.
+name = "low_cost_robot_arm"
+
+[model]
+mjcf = "menagerie:low_cost_robot_arm"
+floor_geom = "floor"
+keyframe = "home"
+
+[arm]
+joints = ["base_rotation", "pitch", "elbow", "wrist_pitch", "wrist_roll"]
+tcp_body = "gripper_static_finger"
+tool_axis = "-x"
+actuators = ["base_rotation", "pitch", "elbow", "wrist_pitch", "wrist_roll"]
+
+[limits]
+min_clearance_mm = 20
+planning_margin_mm = 10

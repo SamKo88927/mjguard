@@ -63,6 +63,23 @@ The suggestion is the farthest point toward the target that passed every check, 
 it back, and re-planned deterministically, so following it (with the `tool_down` it names) is accepted. A property test sends random targets and
 follows every suggestion to keep it that way.
 
+## Built-in robots
+
+Thirteen arms from [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie), downloaded on first use.
+CI runs every one of them end to end with its own servos under gravity: reach a target, refuse one in the table and
+one out of reach, stay above the hard clearance limit, follow the suggestion.
+
+| Hobby and research | Collaborative and industrial |
+| --- | --- |
+| `so_arm100`, `so_arm101` (LeRobot) | `ur5e`, `ur10e` (Universal Robots) |
+| `low_cost_robot_arm` | `panda`, `fr3` (Franka) |
+| `piper` (AgileX) | `iiwa14` (KUKA) |
+| `yam` (I2RT) | `gen3` (Kinova) |
+| `z1` (Unitree) | `xarm7` (UFACTORY) |
+
+Each preset's planning margin covers the tracking error its model's servos show in simulation (10 mm for most,
+40 mm for the Z1). Grippers are configured for the Panda only so far.
+
 ## Your own robot
 
 Write a small TOML file next to your MJCF:
@@ -91,6 +108,12 @@ workspace_mm = { x = [-600, 600], y = [-600, 600] }
 mjguard check robot.toml     # loads it, checks the rest pose, prints the envelope
 mjguard serve robot.toml     # MCP over stdio
 ```
+
+Two kinds of contact are part of a model's design rather than a collision, and mjguard treats them that way:
+contacts the model already has in its rest pose (Kinova Gen3's base and shoulder hulls overlap; closed fingers touch;
+a UR shoulder sits on the floor) are allowed up to the depth they have at rest, and `mjguard check` lists them; and
+bodies moved by exactly the same commanded joints (two fingers of a gripper you did not configure) cannot collide
+because of anything you command.
 
 Links whose moving joints all spin about a vertical axis (a turret on its base) cannot change height, so they are
 exempt from the clearance check; they are still collision-checked.

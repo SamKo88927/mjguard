@@ -1,0 +1,18 @@
+# SO-ARM101 (LeRobot) from MuJoCo Menagerie (downloaded on first use).
+# Tool axis: the last joint's axis, pointing away from the wrist. Planning margin covers the tracking error
+# measured with the model's own servos under gravity.
+name = "so_arm101"
+
+[model]
+mjcf = "menagerie:so_arm101"
+floor_geom = "floor"
+
+[arm]
+joints = ["1", "2", "3", "4", "5"]
+tcp_site = "gripper"
+tool_axis = "y"
+actuators = ["1", "2", "3", "4", "5"]
+
+[limits]
+min_clearance_mm = 20
+planning_margin_mm = 20

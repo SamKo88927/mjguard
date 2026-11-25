@@ -1,0 +1,19 @@
+# UFACTORY xArm7 from MuJoCo Menagerie (downloaded on first use).
+# Tool axis: the last joint's axis, pointing away from the wrist. Planning margin covers the tracking error
+# measured with the model's own servos under gravity.
+name = "xarm7"
+
+[model]
+mjcf = "menagerie:xarm7"
+floor_geom = "floor"
+keyframe = "home"
+
+[arm]
+joints = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
+tcp_site = "link_tcp"
+tool_axis = "z"
+actuators = ["act1", "act2", "act3", "act4", "act5", "act6", "act7"]
+
+[limits]
+min_clearance_mm = 20
+planning_margin_mm = 15

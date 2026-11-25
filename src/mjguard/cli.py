@@ -63,6 +63,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "rest_pose": "passes" if refusal is None else refusal.to_dict(),
                 "rest_clearance_mm": round(clearance, 1),
                 "moving_collision_geoms": len(guard.model.moving_geoms),
+                "contacts_allowed_from_rest_pose": guard.model.describe_rest_contacts(),
                 "physics": bool(config.actuators),
                 "limits": guard.describe(),
             }

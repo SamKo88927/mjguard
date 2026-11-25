@@ -1,0 +1,19 @@
+# Franka FR3 from MuJoCo Menagerie (downloaded on first use).
+# Tool axis: the last joint's axis, pointing away from the wrist. Planning margin covers the tracking error
+# measured with the model's own servos under gravity.
+name = "fr3"
+
+[model]
+mjcf = "menagerie:fr3"
+floor_geom = "floor"
+keyframe = "home"
+
+[arm]
+joints = ["fr3_joint1", "fr3_joint2", "fr3_joint3", "fr3_joint4", "fr3_joint5", "fr3_joint6", "fr3_joint7"]
+tcp_site = "attachment_site"
+tool_axis = "z"
+actuators = ["fr3_joint1", "fr3_joint2", "fr3_joint3", "fr3_joint4", "fr3_joint5", "fr3_joint6", "fr3_joint7"]
+
+[limits]
+min_clearance_mm = 20
+planning_margin_mm = 10

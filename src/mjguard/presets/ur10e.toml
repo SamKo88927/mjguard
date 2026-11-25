@@ -1,0 +1,19 @@
+# Universal Robots UR10e from MuJoCo Menagerie (downloaded on first use).
+# Tool axis: the last joint's axis, pointing away from the wrist. Planning margin covers the tracking error
+# measured with the model's own servos under gravity.
+name = "ur10e"
+
+[model]
+mjcf = "menagerie:ur10e"
+floor_geom = "floor"
+keyframe = "home"
+
+[arm]
+joints = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
+tcp_site = "attachment_site"
+tool_axis = "z"
+actuators = ["shoulder_pan", "shoulder_lift", "elbow", "wrist_1", "wrist_2", "wrist_3"]
+
+[limits]
+min_clearance_mm = 20
+planning_margin_mm = 10

@@ -22,5 +22,6 @@ ctrl_closed = 0
 ctrl_open = 255
 
 [limits]
-min_clearance_mm = 30
+min_clearance_mm = 20
+planning_margin_mm = 10
 max_joint_speed_dps = 45

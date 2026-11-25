@@ -1,0 +1,19 @@
+# KUKA LBR iiwa 14 from MuJoCo Menagerie (downloaded on first use).
+# Tool axis: the last joint's axis, pointing away from the wrist. Planning margin covers the tracking error
+# measured with the model's own servos under gravity.
+name = "iiwa14"
+
+[model]
+mjcf = "menagerie:iiwa14"
+floor_geom = "floor"
+keyframe = "home"
+
+[arm]
+joints = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
+tcp_site = "attachment_site"
+tool_axis = "z"
+actuators = ["actuator1", "actuator2", "actuator3", "actuator4", "actuator5", "actuator6", "actuator7"]
+
+[limits]
+min_clearance_mm = 20
+planning_margin_mm = 25

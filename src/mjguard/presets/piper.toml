@@ -1,0 +1,19 @@
+# AgileX PiPER from MuJoCo Menagerie (downloaded on first use).
+# Tool axis: the last joint's axis, pointing away from the wrist. Planning margin covers the tracking error
+# measured with the model's own servos under gravity.
+name = "piper"
+
+[model]
+mjcf = "menagerie:piper"
+floor_geom = "floor"
+keyframe = "home"
+
+[arm]
+joints = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+tcp_body = "link6"
+tool_axis = "z"
+actuators = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+
+[limits]
+min_clearance_mm = 20
+planning_margin_mm = 10

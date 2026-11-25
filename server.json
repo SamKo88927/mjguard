@@ -25,7 +25,7 @@
         {
           "type": "positional",
           "valueHint": "robot",
-          "description": "Robot config TOML, or a built-in preset: ur5e, panda (needs the [menagerie] extra)",
+          "description": "Robot config TOML, or a built-in preset: ur5e, panda",
           "isRequired": true,
           "default": "ur5e"
         }

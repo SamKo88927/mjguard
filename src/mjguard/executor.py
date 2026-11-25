@@ -244,8 +244,8 @@ class Executor:
         def monitor(q: Vec, g: Vec) -> None:
             clearance = self._monitor.clearance_mm(q, g)
             lowest[0] = min(lowest[0], clearance)
-            if clearance < lim.min_clearance_mm * 0.5:
-                breach.append(f"measured clearance {clearance:.1f} mm")
+            if clearance < lim.min_clearance_mm:
+                breach.append(f"measured clearance {clearance:.1f} mm, hard limit {lim.min_clearance_mm:g} mm")
             elif contacts := self._monitor.contacts(q, g):
                 breach.append(f"measured contact {contacts[0].a} / {contacts[0].b}")
 
@@ -253,6 +253,8 @@ class Executor:
             plan.waypoints, gripper, period, lambda: self._stop.is_set() or bool(breach), monitor
         )
         final = self.transport.read()
+        if not breach:
+            monitor(*final)  # after the servos settle: what the arm holds now must be inside the envelope too
         with self._view_lock:
             planned_tool = self._view.tool(plan.waypoints[-1])[0]
             measured_tool = self._view.tool(final[0])[0]

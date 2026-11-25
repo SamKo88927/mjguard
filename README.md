@@ -9,7 +9,8 @@ reach it: the agent asks for a pose, mjguard plans it, checks every waypoint aga
 and either moves or returns a refusal the model can act on.
 
 ```sh
-uvx --from 'mjguard[menagerie]' mjguard serve ur5e     # or: panda, or your own robot.toml
+uvx --from 'mjguard[menagerie]' mjguard check panda    # first run downloads MuJoCo Menagerie (about a minute)
+uvx --from 'mjguard[menagerie]' mjguard serve panda    # MCP over stdio; or ur5e, or your own robot.toml
 ```
 
 <p align="center">
@@ -28,12 +29,14 @@ Every motion is planned into joint-space waypoints, and **every waypoint** is ch
 | --- | --- |
 | Joint ranges from the model, minus a margin | `JOINT_LIMIT` |
 | Contacts between moving links and the rest of the scene, from MuJoCo's own collision pipeline | `COLLISION`, `TABLE_COLLISION` |
-| Distance from every moving collision geom (meshes included) and the tool point to the floor or table | `TABLE_CLEARANCE` |
+| Distance from every moving collision geom (meshes included) and the tool point to the floor or table, with a planning margin above the hard limit | `TABLE_CLEARANCE` |
 | An optional workspace box for the tool point | `WORKSPACE` |
 | IK convergence: a miss beyond 1 mm or 1.5° is a refusal, never a "close enough" plan | `UNREACHABLE` |
 
-While the motion runs, a monitor checks what the robot **actually** did and halts it (`ENVELOPE_BREACH`) if the
-measured arm leaves the envelope, so a sagging servo or a bad transport cannot carry a checked plan into the floor.
+While the motion runs, and again after the servos settle, a monitor checks what the robot **actually** did and
+halts it (`ENVELOPE_BREACH`) if the measured arm crosses the hard limit or touches anything. Plans keep a margin
+(10 mm by default) above that limit: under physics, the UR5e and Panda presets settle about 6 mm below their plan,
+and a test pins that they stay above the hard limit.
 
 ## Refusals a model can use
 
@@ -50,7 +53,7 @@ measured arm leaves the envelope, so a sagging servo or a bad transport cannot c
 ```
 
 The suggestion is the farthest point toward the target that passed every check, rounded the way a model will send
-it back, and re-planned deterministically, so following it is accepted. A property test sends random targets and
+it back, and re-planned deterministically, so following it (with the `tool_down` it names) is accepted. A property test sends random targets and
 follows every suggestion to keep it that way.
 
 ## Your own robot
@@ -72,7 +75,8 @@ tool_axis = "z"             # the axis that points out of the tool
 actuators = ["a1", "a2", "a3", "a4", "a5", "a6"]   # position servos: simulate with physics; omit for kinematic
 
 [limits]
-min_clearance_mm = 20
+min_clearance_mm = 20       # hard limit, enforced on the measured arm
+planning_margin_mm = 10     # plans keep 30 mm
 workspace_mm = { x = [-600, 600], y = [-600, 600] }
 ```
 

@@ -92,12 +92,12 @@ class Guard:
                 return Refusal("TABLE_COLLISION", f"{c.a if c.b == 'world' else c.b} would touch the floor"), 0.0
             return Refusal("COLLISION", f"{c.a} would touch {c.b} ({c.depth_mm} mm deep)", {"a": c.a, "b": c.b}), 0.0
         clearance = self.model.clearance_mm(q, gripper)
-        if clearance < self.limits.min_clearance_mm:
+        if clearance < self.limits.planning_clearance_mm:
             return (
                 Refusal(
                     "TABLE_CLEARANCE",
-                    f"a moving part would be {clearance:.1f} mm above the floor; "
-                    f"the minimum is {self.limits.min_clearance_mm:g} mm",
+                    f"a moving part would be {clearance:.1f} mm above the floor; plans keep at least "
+                    f"{self.limits.planning_clearance_mm:g} mm",
                     {"clearance_mm": round(clearance, 1)},
                 ),
                 clearance,
@@ -168,11 +168,11 @@ class Guard:
         if refusal is not None:
             return refusal
         height = (float(target[2]) - self.model.floor_z) * 1000
-        if height < self.limits.min_clearance_mm:
+        if height < self.limits.planning_clearance_mm:
             return Refusal(
                 "TABLE_CLEARANCE",
                 f"target z is {height:.1f} mm above the floor; the tool must stay at least "
-                f"{self.limits.min_clearance_mm:g} mm above it",
+                f"{self.limits.planning_clearance_mm:g} mm above it",
                 {"z_mm": round(height, 1)},
             )
         q = self.solve(target, direction, current)
@@ -202,7 +202,9 @@ class Guard:
                 "x_mm": _mm(float(good[0])),
                 "y_mm": _mm(float(good[1])),
                 "z_mm": _mm(float(good[2]) - self.model.floor_z),
-                "note": f"farthest checked-safe point on the straight line toward the target ({lo:.0%} of the way)",
+                "tool_down": direction is not None,
+                "note": f"farthest checked-safe point on the straight line toward the target ({lo:.0%} of the way); "
+                "send it with the same tool_down",
             }
         return plan
 
@@ -221,6 +223,7 @@ class Guard:
             "robot": self.config.name,
             "frame": "world frame of the MJCF; millimetres; z is the height above the floor plane",
             "min_clearance_mm": lim.min_clearance_mm,
+            "planning_clearance_mm": lim.planning_clearance_mm,
             "workspace_mm": {k: list(v) for k, v in lim.workspace_mm.items()},
             "max_joint_speed_dps": lim.max_joint_speed_dps,
             "joints": joints,

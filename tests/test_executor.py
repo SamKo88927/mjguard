@@ -99,5 +99,6 @@ def test_random_targets_never_breach_clearance(executor: Executor, x: float, y: 
     assert r["state"]["min_clearance_mm"] >= limit - 0.5
     sug = r.get("refusal", {}).get("suggestion")
     if sug:
-        follow = executor.move_to(sug["x_mm"], sug["y_mm"], sug["z_mm"], tool_down=down, speed=1.0)
+        assert sug["tool_down"] is down
+        follow = executor.move_to(sug["x_mm"], sug["y_mm"], sug["z_mm"], tool_down=sug["tool_down"], speed=1.0)
         assert follow["ok"] is True, follow

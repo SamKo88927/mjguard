@@ -54,3 +54,21 @@ def test_http_refuses_non_loopback(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
         main(["serve", str(HERE / "three_link.toml"), "--http", "--host", "0.0.0.0"])
     assert "no authentication" in capsys.readouterr().err
+
+
+def test_config_loading_never_writes_to_stdout(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A downloader that prints during config loading must not corrupt the stdio protocol."""
+    import mjguard.config as config_module
+
+    real_load = config_module.load
+
+    def chatty_load(path: str) -> object:
+        print("Cloning https://example.invalid/menagerie.git...")
+        return real_load(path)
+
+    monkeypatch.setattr(config_module, "load", chatty_load)
+    assert main(["check", str(HERE / "three_link.toml")]) == 0
+    out, err = capsys.readouterr()
+    assert out.lstrip().startswith("{") and "Cloning" not in out and "Cloning" in err

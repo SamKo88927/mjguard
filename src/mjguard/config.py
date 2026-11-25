@@ -22,7 +22,9 @@ class Limits:
     """The safety envelope. Frozen at startup; the MCP surface has no way to change it."""
 
     min_clearance_mm: float = 20.0
-    """Every moving collision geom and the tool point stay at least this far above the floor."""
+    """Hard limit: the measured arm is halted if a moving collision geom or the tool point gets closer to the floor."""
+    planning_margin_mm: float = 10.0
+    """Plans keep this much extra clearance above the hard limit, so servo sag and tracking error stay inside it."""
     joint_margin_deg: float = 2.0
     """Planning keeps this far inside each joint's range."""
     max_step_deg: float = 3.0
@@ -33,11 +35,17 @@ class Limits:
     position_tolerance_mm: float = 1.0
     angle_tolerance_deg: float = 1.5
 
+    @property
+    def planning_clearance_mm(self) -> float:
+        return self.min_clearance_mm + self.planning_margin_mm
+
     def __post_init__(self) -> None:
         for name in ("min_clearance_mm", "max_step_deg", "max_joint_speed_dps", "position_tolerance_mm"):
             value = getattr(self, name)
             if not (math.isfinite(value) and value > 0):
                 raise ConfigError(f"limits.{name} must be a positive number, got {value!r}")
+        if not (math.isfinite(self.planning_margin_mm) and self.planning_margin_mm >= 0):
+            raise ConfigError("limits.planning_margin_mm must be >= 0")
         if not (math.isfinite(self.joint_margin_deg) and self.joint_margin_deg >= 0):
             raise ConfigError("limits.joint_margin_deg must be >= 0")
         for axis, bounds in self.workspace_mm.items():

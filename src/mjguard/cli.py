@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import ipaddress
 import json
 import logging
@@ -48,7 +49,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     from .config import ConfigError, load
 
     try:
-        config = load(args.config)
+        # Resolving a Menagerie preset may clone it on first use, and the downloader prints to stdout. In stdio mode
+        # stdout is the protocol, so all of that goes to stderr.
+        with contextlib.redirect_stdout(sys.stderr):
+            config = load(args.config)
         if args.command == "check":
             from .guard import Guard
 

@@ -97,10 +97,7 @@ def _menagerie(name: str) -> Path:
 
         module = importlib.import_module(f"robot_descriptions.{name}_mj_description")
     except ImportError as exc:
-        raise ConfigError(
-            f"menagerie:{name} needs the robot_descriptions package (pip install 'mjguard[menagerie]') "
-            f"and a known Menagerie name: {exc}"
-        ) from exc
+        raise ConfigError(f"menagerie:{name} is not a known MuJoCo Menagerie robot: {exc}") from exc
     mjcf = Path(module.MJCF_PATH)
     scene = mjcf.parent / "scene.xml"
     return scene if scene.exists() else mjcf

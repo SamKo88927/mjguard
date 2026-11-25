@@ -12,4 +12,4 @@
 - Config loading never writes to stdout (the Menagerie downloader prints), so stdio stays a clean protocol.
 - MuJoCo simulator transport: physics with the model's own position servos, or kinematic.
 - MCP server (`mjguard serve`) and config checker (`mjguard check`).
-- Presets: UR5e and Franka Panda from MuJoCo Menagerie (`[menagerie]` extra).
+- Presets: UR5e and Franka Panda from MuJoCo Menagerie, downloaded on first use.

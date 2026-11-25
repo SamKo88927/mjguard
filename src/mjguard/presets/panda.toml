@@ -1,4 +1,4 @@
-# Franka Emika Panda from MuJoCo Menagerie. Needs: pip install 'mjguard[menagerie]'
+# Franka Emika Panda from MuJoCo Menagerie (downloaded on first use).
 name = "panda"
 
 [model]

@@ -1,5 +1,11 @@
 # mjguard
 
+[![PyPI](https://img.shields.io/pypi/v/mjguard)](https://pypi.org/project/mjguard/)
+[![CI](https://github.com/SamKo88927/mjguard/actions/workflows/ci.yml/badge.svg)](https://github.com/SamKo88927/mjguard/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
+<!-- mcp-name: io.github.SamKo88927/mjguard -->
+
 Let an LLM agent drive **any MuJoCo-modelled robot arm** over [MCP](https://modelcontextprotocol.io), with every
 motion checked in the model before it runs.
 
@@ -10,8 +16,8 @@ reach it: the agent asks for a pose, mjguard plans it, checks every waypoint aga
 and either moves or returns a refusal the model can act on.
 
 ```sh
-uvx --from 'mjguard[menagerie]' mjguard check panda    # first run downloads MuJoCo Menagerie (about a minute)
-uvx --from 'mjguard[menagerie]' mjguard serve panda    # MCP over stdio; or ur5e, or your own robot.toml
+uvx mjguard check panda    # first run downloads MuJoCo Menagerie (about a minute)
+uvx mjguard serve panda    # MCP over stdio; or ur5e, or your own robot.toml
 ```
 
 <p align="center">
@@ -65,7 +71,7 @@ Write a small TOML file next to your MJCF:
 name = "my_arm"
 
 [model]
-mjcf = "scene.xml"          # or "menagerie:<name>" with the [menagerie] extra
+mjcf = "scene.xml"          # or "menagerie:<name>"
 floor_geom = "floor"        # a plane; clearance is measured against it
 keyframe = "home"           # start and rest pose
 
@@ -92,7 +98,7 @@ exempt from the clearance check; they are still collision-checked.
 ### Claude Code
 
 ```sh
-claude mcp add ur5e -- uvx --from 'mjguard[menagerie]' mjguard serve ur5e
+claude mcp add ur5e -- uvx mjguard serve ur5e
 ```
 
 ## Tools
@@ -119,7 +125,7 @@ library was extracted from.
 ## Development
 
 ```sh
-uv sync --extra menagerie
+uv sync
 uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest -q
 ```
 

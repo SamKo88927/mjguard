@@ -15,10 +15,10 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dependencies = ["mcp>=1.30,<2", "mujoco>=3.2", "numpy>=1.26", "pydantic>=2.7"]
+dependencies = ["mcp>=1.30,<2", "mujoco>=3.2", "numpy>=1.26", "pydantic>=2.7", "robot_descriptions>=1.15"]
 
 [project.optional-dependencies]
-menagerie = ["robot_descriptions>=1.15"]
+menagerie = []  # kept for compatibility; Menagerie support is now included
 
 [project.scripts]
 mjguard = "mjguard.cli:main"

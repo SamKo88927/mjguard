@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
-      - run: uv sync --locked --extra menagerie
+      - run: uv sync --locked
       - name: Lint
         run: |
           uv run ruff check .

@@ -1,4 +1,4 @@
-# Universal Robots UR5e from MuJoCo Menagerie. Needs: pip install 'mjguard[menagerie]'
+# Universal Robots UR5e from MuJoCo Menagerie (downloaded on first use).
 name = "ur5e"
 
 [model]

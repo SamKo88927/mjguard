@@ -1,6 +1,6 @@
 """Record the README GIF from the real code path: Executor + Guard + SimTransport on a Menagerie arm.
 
-uv run --extra menagerie --group demo python scripts/record_demo.py docs/media/demo.gif [--robot panda]
+uv run --group demo python scripts/record_demo.py docs/media/demo.gif [--robot panda]
 """
 
 from __future__ import annotations

@@ -24,6 +24,7 @@ from .model import ArmModel, Vec
 mj: Any = _mujoco
 
 log = logging.getLogger("mjguard")
+MONITOR_TOLERANCE_MM = 1.0
 Result = dict[str, Any]
 
 
@@ -239,13 +240,25 @@ class Executor:
         speed = float(np.clip(speed, 0.05, 1.0))
         period = lim.max_step_deg / (lim.max_joint_speed_dps * speed)
         lowest = [math.inf]
+        closest = [math.inf]
+        q0, g0 = self.transport.read()
+        start_clear = self._monitor.clearance_mm(q0, g0)
+        start_gap = self._monitor.obstacle_clearance(q0, g0)[0]
         breach: list[str] = []
 
         def monitor(q: Vec, g: Vec) -> None:
             clearance = self._monitor.clearance_mm(q, g)
             lowest[0] = min(lowest[0], clearance)
-            if clearance < lim.min_clearance_mm:
+            gap, part, obstacle = self._monitor.obstacle_clearance(q, g)
+            closest[0] = min(closest[0], gap)
+            # Below a hard limit is a breach, except for an arm that started below it and is not getting closer
+            # (moving away after a halt).
+            if clearance < lim.min_clearance_mm and clearance < start_clear - MONITOR_TOLERANCE_MM:
                 breach.append(f"measured clearance {clearance:.1f} mm, hard limit {lim.min_clearance_mm:g} mm")
+            elif gap < lim.obstacle_clearance_mm and gap < start_gap - MONITOR_TOLERANCE_MM:
+                breach.append(
+                    f"measured {part} {max(gap, 0):.1f} mm from {obstacle}, hard limit {lim.obstacle_clearance_mm:g} mm"
+                )
             elif contacts := self._monitor.contacts(q, g):
                 breach.append(f"measured contact {contacts[0].a} / {contacts[0].b}")
 
@@ -275,6 +288,7 @@ class Executor:
             "executed": {
                 "waypoints": followed.waypoints_done,
                 "min_clearance_mm": round(lowest[0], 1),
+                **({"min_obstacle_gap_mm": round(closest[0], 1)} if math.isfinite(closest[0]) else {}),
                 "tool_tracking_error_mm": tracking_mm,
             },
             "state": self._state(*final),

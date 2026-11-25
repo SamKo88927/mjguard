@@ -63,7 +63,14 @@ after settling. A physics test on both arms pins it.
 **The arm could get stuck.** The same sag, next to an obstacle: after following a suggestion, the arm settled 6 mm
 from a bin with a 10 mm planning gap. Every later plan failed at its first waypoint, including moving away. Found
 while recording the README GIF. Fix: a plan that starts inside the margin may move as long as no waypoint gets closer
-than where it started; hard limits and contacts are never relaxed.
+than where it started.
+
+**The obstacle gap was only a plan-time promise.** Checking the previous fix on heavier arms showed it: beside a
+box, the Z1 settled 2.7 mm from it with `ok: true` (10 mm configured), and the iiwa touched it. The floor had a hard
+limit enforced on the measured arm; obstacles did not. Fix: the configured obstacle gap is now a hard limit on the
+measured arm too, and plans keep it plus each robot's planning margin. A physics test on four arms runs three
+approach cycles each and checks the measured gap every time. An arm that starts below a hard limit (after a halt)
+may only move away from it; contacts are never relaxed.
 
 **Designed-in contacts looked like collisions.** Bringing up thirteen arms from MuJoCo Menagerie, three failed their
 own rest pose: Kinova Gen3's base and shoulder hulls overlap by 12 mm, YAM's closed fingers touch, and a UR10e

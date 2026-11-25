@@ -95,22 +95,23 @@ class Guard:
         Normally the planning values. If the measured arm already sits inside the planning margin (servo sag or
         tracking error after a move that was planned right at the margin), a plan may not get any closer than where
         it starts, but it may move: otherwise every motion, including moving away, would be refused and the arm
-        would be stuck. The hard floor limit and contacts are never relaxed.
+        would be stuck. Below the hard limit (an arm the monitor halted) the same holds: it may only move away.
+        Contacts are never relaxed, and the monitor enforces the hard limits on the measured arm.
         """
         floor = self.limits.planning_clearance_mm
         start_clearance = self.model.clearance_mm(start, gripper)
         if start_clearance < floor:
-            floor = max(self.limits.min_clearance_mm, start_clearance - RELAX_TOLERANCE_MM)
-        obstacle = self.limits.obstacle_clearance_mm
+            floor = start_clearance - RELAX_TOLERANCE_MM
+        obstacle = self.limits.planning_obstacle_mm
         start_gap = self.model.obstacle_clearance(start, gripper)[0]
         if start_gap < obstacle:
-            obstacle = max(0.0, start_gap - RELAX_TOLERANCE_MM)
+            obstacle = start_gap - RELAX_TOLERANCE_MM
         return floor, obstacle
 
     def check_configuration(
         self, q: Vec, gripper: Vec | None = None, thresholds: tuple[float, float] | None = None
     ) -> tuple[Refusal | None, float]:
-        floor_mm, obstacle_mm = thresholds or (self.limits.planning_clearance_mm, self.limits.obstacle_clearance_mm)
+        floor_mm, obstacle_mm = thresholds or (self.limits.planning_clearance_mm, self.limits.planning_obstacle_mm)
         refusal = self.check_joints(q)
         if refusal is not None:
             return refusal, math.nan
@@ -321,6 +322,7 @@ class Guard:
             "joints": joints,
             "has_gripper": self.config.gripper is not None,
             "obstacle_clearance_mm": lim.obstacle_clearance_mm,
+            "planning_obstacle_mm": lim.planning_obstacle_mm,
             "obstacles": [
                 {"name": o.name, "shape": o.shape, "size_mm": list(o.size_mm), "center_mm": list(o.center_mm)}
                 for o in self.config.obstacles

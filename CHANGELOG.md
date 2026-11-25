@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.2 (2026-11-25)
+
+- Fix (safety): the obstacle gap was enforced only at plan time. Under physics the Z1 settled 2.7 mm from a box with
+  `ok: true` and the iiwa touched it. `obstacle_clearance_mm` is now a hard limit the monitor enforces on the
+  measured arm; plans keep it plus `planning_margin_mm`. Results report `executed.min_obstacle_gap_mm`.
+- An arm that starts below a hard limit (after a halt) may move, but not closer; the monitor allows that and nothing
+  else. Contacts are never relaxed.
+- Physics test: four arms, three approach cycles beside a box, measured gap checked each time.
+
 ## 0.3.1 (2026-11-25)
 
 - Fix: an arm that settled inside the planning margin (servo sag after a move planned right at the margin) could not

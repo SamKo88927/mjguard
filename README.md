@@ -40,12 +40,12 @@ Every motion is planned into joint-space waypoints, and **every waypoint** is ch
 | Joint ranges from the model, minus a margin | `JOINT_LIMIT` |
 | Contacts between moving links and the rest of the scene, from MuJoCo's own collision pipeline | `COLLISION`, `TABLE_COLLISION` |
 | Distance from every moving collision geom (meshes included) and the tool point to the floor or table, with a planning margin above the hard limit | `TABLE_CLEARANCE` |
-| Distance from every moving collision geom to every obstacle in the config | `OBSTACLE_CLEARANCE`, `COLLISION` |
+| Distance from every moving collision geom to every obstacle in the config, with the same planning margin | `OBSTACLE_CLEARANCE`, `COLLISION` |
 | An optional workspace box for the tool point | `WORKSPACE` |
 | IK convergence: a miss beyond 1 mm or 1.5° is a refusal, never a "close enough" plan | `UNREACHABLE` |
 
 While the motion runs, and again after the servos settle, a monitor checks what the robot **actually** did and
-halts it (`ENVELOPE_BREACH`) if the measured arm crosses the hard limit or touches anything. Plans keep a margin
+halts it (`ENVELOPE_BREACH`) if the measured arm crosses a hard limit (floor or obstacle) or touches anything. Plans keep a margin
 (10 mm by default) above that limit: under physics, the UR5e and Panda presets settle about 6 mm below their plan,
 and a test pins that they stay above the hard limit.
 
@@ -106,7 +106,7 @@ actuators = ["a1", "a2", "a3", "a4", "a5", "a6"]   # position servos: simulate w
 min_clearance_mm = 20       # hard limit, enforced on the measured arm
 planning_margin_mm = 10     # plans keep 30 mm
 workspace_mm = { x = [-600, 600], y = [-600, 600] }
-obstacle_clearance_mm = 10
+obstacle_clearance_mm = 10   # hard limit on the measured arm; plans keep 10 + planning_margin_mm
 
 [gripper]                   # optional
 joints = ["finger_left", "finger_right"]

@@ -33,13 +33,18 @@ class Limits:
     workspace_mm: dict[str, tuple[float, float]] = field(default_factory=dict[str, tuple[float, float]])
     """Optional box for the tool point, e.g. {"x": (-400, 600)}. Missing axes are unbounded."""
     obstacle_clearance_mm: float = 10.0
-    """Plans keep every moving collision geom at least this far from every configured obstacle."""
+    """Hard limit: the measured arm is halted if a moving collision geom gets closer to a configured obstacle.
+    Plans keep this plus planning_margin_mm, like the floor."""
     position_tolerance_mm: float = 1.0
     angle_tolerance_deg: float = 1.5
 
     @property
     def planning_clearance_mm(self) -> float:
         return self.min_clearance_mm + self.planning_margin_mm
+
+    @property
+    def planning_obstacle_mm(self) -> float:
+        return self.obstacle_clearance_mm + self.planning_margin_mm
 
     def __post_init__(self) -> None:
         for name in ("min_clearance_mm", "max_step_deg", "max_joint_speed_dps", "position_tolerance_mm"):

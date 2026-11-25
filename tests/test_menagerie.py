@@ -105,3 +105,37 @@ def test_check_lists_contacts_allowed_from_the_rest_pose(capsys: pytest.CaptureF
     report = json.loads(capsys.readouterr().out)
     pairs = [c["bodies"] for c in report["contacts_allowed_from_rest_pose"]]
     assert ["base_link", "shoulder_link"] in pairs
+
+
+@pytest.mark.parametrize(
+    ("preset", "box", "approach_z", "tool_down"),
+    [
+        ("iiwa14", (518, -100, 80), 20, True),
+        ("panda", (450, -200, 80), 60, True),
+        ("z1", (250, -60, 50), 105, False),
+        ("so_arm101", (200, -200, 30), 65, False),
+    ],
+)
+def test_measured_arm_keeps_the_obstacle_gap_under_physics(
+    preset: str, box: tuple[float, float, float], approach_z: float, tool_down: bool
+) -> None:
+    """Plans keep gap + margin; under the model's own servos the measured arm must stay above the hard gap, cycle
+    after cycle. Before 0.3.2 the iiwa touched the box and the Z1 settled 2.7 mm from it with ok=true."""
+    import tomllib
+    from pathlib import Path
+
+    from mjguard.config import from_dict
+
+    path = Path(__file__).parents[1] / f"src/mjguard/presets/{preset}.toml"
+    data = tomllib.loads(path.read_text())
+    data["obstacles"] = [{"name": "box", "shape": "box", "size_mm": [120, 120, box[2] * 2], "center_mm": list(box)}]
+    config = from_dict(data, path.parent)
+    executor = Executor(config, SimTransport(config))
+    hard = config.limits.obstacle_clearance_mm
+    s = executor.move_to(box[0], box[1], approach_z, tool_down=tool_down)["refusal"]["suggestion"]
+    for _ in range(3):
+        r = executor.move_to(s["x_mm"], s["y_mm"], s["z_mm"], tool_down=s["tool_down"])
+        assert r["ok"] is True, r.get("refusal")
+        assert r["executed"]["min_obstacle_gap_mm"] >= hard
+        assert executor.guard.model.obstacle_clearance(*executor.transport.read())[0] >= hard
+        assert executor.move_to(s["x_mm"], s["y_mm"], s["z_mm"] + 120, tool_down=s["tool_down"])["ok"] is True

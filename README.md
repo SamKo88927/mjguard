@@ -3,8 +3,9 @@
 Let an LLM agent drive **any MuJoCo-modelled robot arm** over [MCP](https://modelcontextprotocol.io), with every
 motion checked in the model before it runs.
 
-Language models refuse unsafe requests in chat, then carry them out when they hold a robot's tools
-(["Refuses in Chat, Complies with Arms"](https://arxiv.org/abs/2610.14043)). mjguard puts the check below the model, where a prompt cannot
+Language models refuse unsafe requests in chat, then carry them out when they hold a robot's tools: refusal falls
+from 73% of text requests to 18-25% once the model controls the arm
+(["Refuses in Chat, Complies with Arms"](https://arxiv.org/abs/2610.14043), Sun et al., 2026). mjguard puts the check below the model, where a prompt cannot
 reach it: the agent asks for a pose, mjguard plans it, checks every waypoint against the robot's own MuJoCo model,
 and either moves or returns a refusal the model can act on.
 

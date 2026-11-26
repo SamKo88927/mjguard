@@ -262,7 +262,7 @@ class Guard:
                 "TABLE_CLEARANCE",
                 f"target z is {height:.1f} mm above the floor; the tool must stay at least "
                 f"{self.limits.planning_clearance_mm:g} mm above it",
-                {"z_mm": round(height, 1)},
+                {"z_mm": round(height, 1), "limit_mm": self.limits.planning_clearance_mm},
             )
         if line:
             return self.plan_line(current, target, direction, gripper)

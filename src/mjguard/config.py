@@ -92,6 +92,25 @@ class Gripper:
     ctrl_open: float | None = None
 
 
+LANGS = ("en", "zh-TW")
+
+
+@dataclass(frozen=True)
+class Ui:
+    """How results are presented to people. Nothing here widens the envelope."""
+
+    lang: str = "en"
+    """Language of `message_human` in refusals: en or zh-TW. `message` is always English, for models."""
+    require_confirmation: bool = False
+    """When true, motion tools only preview; a motion runs only through execute(plan_id)."""
+
+    def __post_init__(self) -> None:
+        if self.lang not in LANGS:
+            raise ConfigError(f"ui.lang must be one of {', '.join(LANGS)}, got {self.lang!r}")
+        if not isinstance(self.require_confirmation, bool):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise ConfigError("ui.require_confirmation must be true or false")
+
+
 @dataclass(frozen=True)
 class RobotConfig:
     name: str
@@ -109,6 +128,7 @@ class RobotConfig:
     gripper: Gripper | None = None
     obstacles: tuple[Obstacle, ...] = ()
     limits: Limits = field(default_factory=Limits)
+    ui: Ui = field(default_factory=Ui)
 
     def __post_init__(self) -> None:
         if not self.joints:
@@ -161,6 +181,10 @@ def from_dict(data: dict[str, Any], base: Path) -> RobotConfig:
         limits = Limits(**raw_limits)
     except TypeError as exc:
         raise ConfigError(f"[limits]: {exc}") from exc
+    try:
+        ui = Ui(**data.get("ui", {}))
+    except TypeError as exc:
+        raise ConfigError(f"[ui]: {exc}") from exc
     gripper = None
     if "gripper" in data:
         g = data["gripper"]
@@ -198,6 +222,7 @@ def from_dict(data: dict[str, Any], base: Path) -> RobotConfig:
         gripper=gripper,
         obstacles=tuple(obstacles),
         limits=limits,
+        ui=ui,
     )
 
 

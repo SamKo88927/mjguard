@@ -31,7 +31,8 @@ the current motion; it is a software stop.
 
 Motion tools take preview=true to plan and check without moving: the result has executed=false and a plan_id, and
 execute(plan_id) runs that plan once if the arm has not moved since. {confirmation}pause() halts and keeps the rest
-of the motion; resume() re-checks and continues it.
+of the motion. A PAUSED result means a person paused the arm: do not call resume() or start another motion unless
+you are asked to.
 """
 CONFIRMATION = """This server requires confirmation: every motion tool only previews (executed=false, nothing moved) \
 until execute(plan_id) is called. """
@@ -47,8 +48,10 @@ Preview = Annotated[
     bool,
     Field(description="Plan and check only; nothing moves. The result's plan_id can be passed to execute."),
 ]
-JogMm = Annotated[float, Field(allow_inf_nan=False, ge=-JOG_MAX_MM, le=JOG_MAX_MM)]
-PoseName = Annotated[str, Field(pattern=r"^[\w-]{1,40}$", description="1-40 letters, digits, '_' or '-'.")]
+# Caps and name rules are enforced by the executor, so a UI gets a BAD_TARGET refusal with message_human rather than
+# a schema error.
+JogMm = Annotated[float, Field(allow_inf_nan=False, description=f"Millimetres; at most {JOG_MAX_MM:g} mm in total.")]
+PoseName = Annotated[str, Field(max_length=100, description="1-40 letters, digits, '_' or '-'.")]
 
 
 def tool_result(payload: dict[str, Any]) -> CallToolResult:
@@ -157,9 +160,7 @@ def create_server(
             float,
             Field(
                 allow_inf_nan=False,
-                ge=-JOG_MAX_JOINT,
-                le=JOG_MAX_JOINT,
-                description="Degrees for hinge joints, millimetres for slide joints; at most 10.",
+                description=f"Degrees for hinge joints, millimetres for slide joints; at most {JOG_MAX_JOINT:g}.",
             ),
         ],
         speed: Speed = 0.5,
@@ -183,8 +184,8 @@ def create_server(
 
     @server.tool(annotations=act)
     async def resume() -> CallToolResult:
-        """Continue a paused motion. The path from where the arm is now through the rest of the motion is checked
-        again first; if the world changed, it is refused and stays paused until resume() or stop()."""
+        """Continue a paused motion, only when asked to. The path from where the arm is now through the rest of the
+        motion is checked again first; if the world changed, it is refused and stays paused until resume() or stop()."""
         return await in_thread(executor.resume)
 
     @server.tool(annotations=halt)

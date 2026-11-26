@@ -547,7 +547,8 @@ class Executor:
             if paused:
                 refusal = Refusal(
                     "PAUSED",
-                    f"paused with {len(remainder)} of {n} waypoints left; resume() re-checks and continues",
+                    f"paused on request with {len(remainder)} of {n} waypoints left; do not resume or start another "
+                    "motion unless asked",
                     {"remaining_waypoints": len(remainder)},
                 )
             else:

@@ -25,7 +25,7 @@ CODES = {
     "STOPPED": "the motion was stopped before it finished",
     "ENVELOPE_BREACH": "the measured arm left the envelope during the motion and was halted",
     "INTERNAL_ERROR": "a fault inside the server; the arm is free for the next call",
-    "PAUSED": "the motion was paused; resume() continues it after a fresh check, stop() discards it",
+    "PAUSED": "the motion was paused on request; do not resume or start another motion unless asked",
     "NOTHING_TO_RESUME": "there is no paused motion to resume",
     "PLAN_UNKNOWN": "no previewed plan has this id",
     "PLAN_EXPIRED": "the previewed plan is too old; preview it again",

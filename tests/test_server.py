@@ -112,10 +112,17 @@ async def test_preview_execute_jog_poses_over_mcp(executor: Executor) -> None:
         assert again.isError is True and again.structuredContent is not None
         assert again.structuredContent["refusal"]["code"] == "PLAN_USED"
         assert (await client.call_tool("jog", {"dz_mm": 20})).isError is False
-        assert (await client.call_tool("jog", {"dz_mm": 60})).isError is True  # schema cap
+        for tool, args in (
+            ("jog", {"dz_mm": 60}),
+            ("jog_joint", {"joint": "yaw", "delta": 11}),
+            ("save_pose", {"name": "no spaces"}),
+        ):
+            capped = await client.call_tool(tool, args)
+            assert capped.isError is True and capped.structuredContent is not None, tool
+            assert capped.structuredContent["refusal"]["code"] == "BAD_TARGET", tool
+            assert capped.structuredContent["refusal"]["message_human"], tool
         assert (await client.call_tool("jog_joint", {"joint": "yaw", "delta": 5})).isError is False
         assert (await client.call_tool("save_pose", {"name": "here"})).isError is False
-        assert (await client.call_tool("save_pose", {"name": "no spaces"})).isError is True
         listed = await client.call_tool("list_poses", {})
         assert listed.structuredContent is not None and list(listed.structuredContent["poses"]) == ["here"]
         assert (await client.call_tool("rest", {})).isError is False

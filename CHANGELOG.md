@@ -21,6 +21,11 @@ the same plan, check, follow and monitor path; nothing widens the envelope.
   events over HTTP, with the MCP endpoint's Host/Origin checks.
 - `message_human` on every refusal and a `human` sentence on suggestions, in `--lang en` or `zh-TW` (`[ui] lang`).
 - Refusal details carry `limit_mm` for clearance refusals; suggestions carry `fraction`.
+- Callback subscribers run on their own thread, so a slow or failing callback can never delay a stop or a breach
+  halt (test: a callback that sleeps 1 s per event does not slow a stop). `events.flush()` waits for them.
+- A new motion that replaces a paused one says so: `discarded_paused_motion: true` in its result.
+- Confirmation and pause are protocol steps, not authorization: any client of the server can call `execute` or
+  `resume`. Put authentication in front of the server if people and agents share it.
 
 ## 0.3.2 (2026-11-25)
 

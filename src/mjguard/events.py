@@ -1,8 +1,9 @@
 """In-process event bus: what the arm is doing, for a UI to show while it happens.
 
 Publishers are the executor's threads, including the monitor inside the follow loop, so publishing never blocks and
-never raises: each subscriber gets a bounded queue (events are dropped for a subscriber that falls behind) or a
-callback whose exceptions are logged and swallowed.
+never raises: every subscriber gets a bounded queue (events are dropped for a subscriber that falls behind). A
+callback subscriber is fed from its queue by its own daemon thread, so a slow or failing callback can never delay
+stop or breach handling; its exceptions are logged and swallowed.
 """
 
 from __future__ import annotations
@@ -52,6 +53,12 @@ class Subscription:
         except queue.Empty:
             return None
 
+    def done(self) -> None:
+        self._queue.task_done()
+
+    def pending(self) -> int:
+        return self._queue.unfinished_tasks
+
     def close(self) -> None:
         self._bus.unsubscribe(self)
 
@@ -60,7 +67,7 @@ class EventBus:
     def __init__(self, keep: int = 200) -> None:
         self._lock = threading.Lock()
         self._recent: deque[Event] = deque(maxlen=keep)
-        self._callbacks: list[Callable[[Event], None]] = []
+        self._callback_subs: list[Subscription] = []
         self._queues: list[Subscription] = []
         self._seq = 0
 
@@ -69,28 +76,55 @@ class EventBus:
             self._seq += 1
             event: Event = {"seq": self._seq, "t": round(time.time(), 3), "type": type, **data}
             self._recent.append(event)
-            callbacks = list(self._callbacks)
             queues = list(self._queues)
         for q in queues:
             q.put(event)
-        for cb in callbacks:
-            try:
-                cb(event)
-            except Exception:
-                log.exception("event subscriber failed on %s", type)
         return event
 
-    def subscribe(self, callback: Callable[[Event], None]) -> Callable[[], None]:
-        """Call `callback(event)` for every event, on the publishing thread. Keep it short. Returns unsubscribe."""
+    def subscribe(self, callback: Callable[[Event], None], maxsize: int = 1000) -> Callable[[], None]:
+        """Call `callback(event)` for every event, on a dedicated thread (never the publisher's). Returns unsubscribe.
+
+        Events reach the callback in order. `flush()` waits until every callback has seen what was published.
+        """
+        sub = self.subscribe_queue(maxsize)
+        stopped = threading.Event()
+
+        def run() -> None:
+            while not stopped.is_set():
+                event = sub.get(timeout=0.1)
+                if event is None:
+                    continue
+                try:
+                    callback(event)
+                except Exception:
+                    log.exception("event subscriber failed on %s", event.get("type"))
+                finally:
+                    sub.done()
+
+        threading.Thread(target=run, name="mjguard-events", daemon=True).start()
         with self._lock:
-            self._callbacks.append(callback)
+            self._callback_subs.append(sub)
 
         def unsubscribe() -> None:
+            stopped.set()
+            sub.close()
             with self._lock:
-                if callback in self._callbacks:
-                    self._callbacks.remove(callback)
+                if sub in self._callback_subs:
+                    self._callback_subs.remove(sub)
 
         return unsubscribe
+
+    def flush(self, timeout: float = 2.0) -> bool:
+        """Wait until every callback subscriber has handled every event published so far. False on timeout."""
+        deadline = time.monotonic() + timeout
+        with self._lock:
+            subs = list(self._callback_subs)
+        for sub in subs:
+            while sub.pending() and time.monotonic() < deadline:
+                time.sleep(0.002)
+            if sub.pending():
+                return False
+        return True
 
     def subscribe_queue(self, maxsize: int = 1000) -> Subscription:
         """A queue that receives every event from now on; close() it when done."""

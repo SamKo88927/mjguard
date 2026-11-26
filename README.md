@@ -181,18 +181,22 @@ target.
 
 **Pause and resume.** `pause()` halts at the next waypoint and keeps the rest of the motion (`get_state` shows
 `"paused": true`). `resume()` checks the path from where the arm is now through the remaining waypoints and
-continues, or refuses with the reason and stays paused. `stop()` or any new motion discards a paused one.
+continues, or refuses with the reason and stays paused. `stop()` or any new motion discards a paused one. A new motion that replaces a paused one reports `discarded_paused_motion: true`.
 
 **Events.** `executor.events` is an in-process bus: `motion_started`, `progress` (at most 10 Hz, with tool pose,
 joints and clearance), `motion_finished`, `refused`, `stopped`, `paused`, `resumed`, `breach`, `pose_saved`,
 `pose_deleted`. Subscribe in Python with `events.subscribe(callback)` or `events.subscribe_queue()`; read the last
 50 from `mjguard://events/latest`; or, with `--http`, stream them as server-sent events from `GET /events`
 (`Last-Event-ID` or `?after=SEQ` replays recent ones). The endpoint has the same loopback-only rule and Host/Origin
-checks as the MCP endpoint; serve the UI from the same origin or proxy it.
+checks as the MCP endpoint; serve the UI from the same origin or proxy it. Callback subscribers run on their own thread, never the arm's, so a slow UI cannot delay a stop.
 
 **Messages for people.** Every refusal keeps `message` (English, detailed, for models) and adds `message_human`, a
 short sentence in `--lang en` or `--lang zh-TW` (`[ui] lang`), e.g. 「會太靠近桌面（還差 12 mm），已停止規劃」.
 Suggestions get a `human` sentence too.
+
+**Not authorization.** Preview-then-confirm and pause are protocol steps for an honest client. Anything that can
+reach the server can call `execute` or `resume`. If people and agents share one server, put authentication in front
+of it; the envelope itself never changes either way.
 
 ```sh
 mjguard serve panda --http --require-confirmation --lang zh-TW --poses poses.json

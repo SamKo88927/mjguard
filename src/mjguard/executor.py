@@ -482,7 +482,8 @@ class Executor:
         speed = float(np.clip(speed, 0.05, 1.0))
         period = self._period(speed)
         with self._paused_lock:
-            self._paused = None  # a new motion replaces whatever was paused
+            discarded = self._paused is not None and not resumed
+            self._paused = None  # a new motion replaces whatever was paused; the result says so
         lowest = [math.inf]
         closest = [math.inf]
         q0, g0 = self.transport.read()
@@ -574,6 +575,8 @@ class Executor:
             "executed": executed,
             "state": state,
         }
+        if discarded:
+            result["discarded_paused_motion"] = True
         if refusal is not None:
             result["refusal"] = humanize(refusal.to_dict(), self.lang)
         if paused:

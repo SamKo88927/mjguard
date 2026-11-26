@@ -245,6 +245,7 @@ def test_pause_then_resume_completes(config: RobotConfig) -> None:
     assert done["ok"] is True and abs(done["state"]["joints"]["yaw"] + 150) < 0.2
     assert ex.get_state()["state"]["paused"] is False
     assert ex.resume()["refusal"]["code"] == "NOTHING_TO_RESUME"
+    assert ex.events.flush()
     flow = [t for t in events if t != "progress"]
     assert flow == [
         "motion_started",
@@ -327,6 +328,7 @@ def test_event_order_for_a_normal_and_a_refused_move(executor: Executor) -> None
     seen: list[dict[str, Any]] = []
     executor.events.subscribe(seen.append)
     assert executor.move_to(300, 50, 120)["ok"] is True
+    assert executor.events.flush()
     types = [e["type"] for e in seen]
     assert types[0] == "motion_started" and types[-1] == "motion_finished" and "progress" in types
     progress = next(e for e in seen if e["type"] == "progress")
@@ -336,12 +338,14 @@ def test_event_order_for_a_normal_and_a_refused_move(executor: Executor) -> None
 
     seen.clear()
     assert executor.move_to(300, 0, 5)["ok"] is False
+    assert executor.events.flush()
     assert [e["type"] for e in seen] == ["refused"]
     assert seen[0]["refusal"]["code"] == "TABLE_CLEARANCE" and "message_human" in seen[0]["refusal"]
 
     seen.clear()
     executor.save_pose("a")
     executor.delete_pose("a")
+    assert executor.events.flush()
     assert [e["type"] for e in seen] == ["pose_saved", "pose_deleted"]
 
 
@@ -359,6 +363,7 @@ def test_breach_and_stop_events(config: RobotConfig) -> None:
     seen: list[str] = []
     ex.events.subscribe(lambda e: seen.append(e["type"]))
     assert ex.move_joints({"yaw": 90})["refusal"]["code"] == "ENVELOPE_BREACH"
+    assert ex.events.flush()
     assert [t for t in seen if t != "progress"] == ["motion_started", "breach", "motion_finished"]
 
     ex = Executor(config, SimTransport(config, realtime=True))
@@ -367,6 +372,7 @@ def test_breach_and_stop_events(config: RobotConfig) -> None:
     mover, _ = start_slow_sweep(ex)
     ex.stop()
     mover.join(5)
+    assert ex.events.flush()
     assert [t for t in seen if t != "progress"] == ["motion_started", "stopped", "motion_finished"]
 
 
@@ -381,6 +387,7 @@ def test_transport_fault_still_finishes_the_motion_event(config: RobotConfig) ->
     seen: list[dict[str, Any]] = []
     ex.events.subscribe(seen.append)
     assert ex.move_joints({"yaw": 10})["refusal"]["code"] == "INTERNAL_ERROR"
+    assert ex.events.flush()
     assert [e["type"] for e in seen] == ["motion_started", "motion_finished", "refused"]
     assert seen[1]["code"] == "INTERNAL_ERROR"
 
@@ -397,6 +404,7 @@ def test_event_bus_queues_callbacks_and_history() -> None:
     bus.subscribe(boom)  # a failing subscriber never breaks the publisher
     for i in range(4):
         bus.publish("progress", i=i)
+    assert bus.flush()
     assert calls == [1, 2, 3, 4]
     assert [e["seq"] for e in bus.latest()] == [2, 3, 4]
     assert [e["seq"] for e in bus.latest(10, after=3)] == [4]
@@ -464,3 +472,27 @@ def test_ui_config_is_validated(config: RobotConfig) -> None:
         make_config(ui={"require_confirmation": "yes"})
     with pytest.raises(ValueError, match="lang"):
         Executor(config, SimTransport(config), lang="fr")
+
+
+def test_a_slow_callback_never_delays_a_stop(config: RobotConfig) -> None:
+    """Callbacks run on their own thread: one that blocks must not slow the follow loop or a stop."""
+    import time as _time
+
+    ex = Executor(config, SimTransport(config, realtime=True))
+    ex.events.subscribe(lambda e: _time.sleep(1.0))  # would add ~1 s per event on the publisher's thread
+    t0 = _time.monotonic()
+    mover, _ = start_slow_sweep(ex)
+    ex.stop()
+    mover.join(5)
+    assert _time.monotonic() - t0 < 2.0
+
+
+def test_a_new_motion_reports_that_it_replaced_a_paused_one(config: RobotConfig) -> None:
+    ex = Executor(config, SimTransport(config, realtime=True))
+    mover, out = start_slow_sweep(ex)
+    ex.pause()
+    mover.join(5)
+    assert out["r"]["refusal"]["code"] == "PAUSED"
+    r = ex.move_joints({"yaw": 0})
+    assert r["ok"] is True and r["discarded_paused_motion"] is True
+    assert ex.resume()["refusal"]["code"] == "NOTHING_TO_RESUME"

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0 (2026-11-26)
+
+Human-robot interaction: a UI, phone app or voice front end can sit on top of mjguard. Everything below goes through
+the same plan, check, follow and monitor path; nothing widens the envelope.
+
+- Preview, then confirm: `preview=true` on every motion tool returns a checked plan (`plan_id`, duration, clearance,
+  obstacle gap, start and end tool pose, a downsampled tool path) without moving. `execute(plan_id)` runs it once,
+  within 60 s, if the measured arm is still at its start, after checking the waypoints again from the measured arm.
+  New codes `PLAN_UNKNOWN`, `PLAN_USED`, `PLAN_EXPIRED`, `PLAN_STALE`. `--require-confirmation` / `[ui]
+  require_confirmation` makes every motion tool preview only.
+- Jog: `jog(dx, dy, dz)` (straight line, at most 50 mm) and `jog_joint(joint, delta)` (at most 10° or 10 mm).
+- Named poses: `save_pose`, `go_to_pose` (gripper only with `include_gripper=true`), `list_poses`, `delete_pose`,
+  `--poses FILE`. A stored pose is only a target, checked against the envelope in force when you go there.
+  `POSE_UNKNOWN`.
+- Pause and resume: `pause()` keeps the remaining waypoints, `resume()` re-checks from the measured arm and continues
+  or refuses and stays paused (`PAUSED`, `NOTHING_TO_RESUME`); `stop()` discards a paused motion.
+- Events: an in-process bus (`motion_started`, `progress`, `motion_finished`, `refused`, `stopped`, `paused`,
+  `resumed`, `breach`, `pose_saved`, `pose_deleted`), `mjguard://events/latest`, and `GET /events` server-sent
+  events over HTTP, with the MCP endpoint's Host/Origin checks.
+- `message_human` on every refusal and a `human` sentence on suggestions, in `--lang en` or `zh-TW` (`[ui] lang`).
+- Refusal details carry `limit_mm` for clearance refusals; suggestions carry `fraction`.
+
 ## 0.3.2 (2026-11-25)
 
 - Fix (safety): the obstacle gap was enforced only at plan time. Under physics the Z1 settled 2.7 mm from a box with

@@ -147,12 +147,65 @@ claude mcp add ur5e -- uvx mjguard serve ur5e
 ## Tools
 
 `get_state`, `get_limits`, `move_to(x_mm, y_mm, z_mm, tool_down=true, speed, path="joint")`,
-`move_joints({name: value})`, `gripper(opening)` (when configured), `rest`, `stop`.
+`move_joints({name: value})`, `gripper(opening)` (when configured), `rest`, `stop`; for people and UIs also
+`jog`, `jog_joint`, `execute`, `pause`, `resume`, `save_pose`, `go_to_pose`, `list_poses`, `delete_pose` (below).
 
 `path="line"` makes the tool point travel a straight line, sampled every 5 mm, with IK solved point to point so the
 arm cannot flip configuration mid-way; a line that crosses a singularity or leaves reach is refused, and a refusal's
-suggestion says which `path` it was checked with. Resources: `mjguard://limits`, `mjguard://trace/latest`.
-Millimetres and degrees; z is the height above the floor plane.
+suggestion says which `path` it was checked with. Resources: `mjguard://limits`, `mjguard://trace/latest`,
+`mjguard://events/latest`. Millimetres and degrees; z is the height above the floor plane.
+
+## Human-robot interaction
+
+A web console, a phone app or a voice front end can sit on top of mjguard. None of these features is a new way to
+move: every one goes through the same plan, check, follow and monitor path, and none can widen the envelope.
+
+**Preview, then confirm.** Every motion tool takes `preview=true`. Nothing moves; the result is either the usual
+refusal (with its suggestion) or `{"ok": true, "executed": false, "plan_id": ..., "expires_in_s": 60, "plan": {...}}`.
+`plan` has the waypoint count, duration, lowest floor clearance and obstacle gap, start and end tool pose, and
+`path_mm`, up to 50 tool positions along the path to draw as a ghost. `execute(plan_id)` runs it once, within 60 s,
+and only if the measured arm is still within 0.5° (or 0.5 mm) of the plan's start (`PLAN_UNKNOWN`, `PLAN_USED`,
+`PLAN_EXPIRED`, `PLAN_STALE` otherwise). The waypoints are checked again, from the measured arm, right before they run.
+With `--require-confirmation` (or `[ui] require_confirmation = true`) every motion tool only previews, so nothing
+moves until someone calls `execute`.
+
+**Jog.** `jog(dx_mm, dy_mm, dz_mm)` moves the tool point in a straight line, at most 50 mm, keeping the tool's
+direction (or pointing it down with `tool_down=true`). `jog_joint(joint, delta)` moves one joint by at most 10° (or
+10 mm). Both are checked like any move; a refused jog's suggestion is an absolute point for `move_to`.
+
+**Named poses.** `save_pose(name)` remembers the joints and gripper opening where the arm is now; `go_to_pose(name)`
+plans and checks a move there against the envelope in force now, so a pose saved before an obstacle was added is
+refused. The gripper stays as it is unless `include_gripper=true`, so going to a pose never drops what the arm
+holds. `--poses poses.json` keeps them across restarts; the file is validated on load, and a pose in it is only a
+target.
+
+**Pause and resume.** `pause()` halts at the next waypoint and keeps the rest of the motion (`get_state` shows
+`"paused": true`). `resume()` checks the path from where the arm is now through the remaining waypoints and
+continues, or refuses with the reason and stays paused. `stop()` or any new motion discards a paused one.
+
+**Events.** `executor.events` is an in-process bus: `motion_started`, `progress` (at most 10 Hz, with tool pose,
+joints and clearance), `motion_finished`, `refused`, `stopped`, `paused`, `resumed`, `breach`, `pose_saved`,
+`pose_deleted`. Subscribe in Python with `events.subscribe(callback)` or `events.subscribe_queue()`; read the last
+50 from `mjguard://events/latest`; or, with `--http`, stream them as server-sent events from `GET /events`
+(`Last-Event-ID` or `?after=SEQ` replays recent ones). The endpoint has the same loopback-only rule and Host/Origin
+checks as the MCP endpoint; serve the UI from the same origin or proxy it.
+
+**Messages for people.** Every refusal keeps `message` (English, detailed, for models) and adds `message_human`, a
+short sentence in `--lang en` or `--lang zh-TW` (`[ui] lang`), e.g. 「會太靠近桌面（還差 12 mm），已停止規劃」.
+Suggestions get a `human` sentence too.
+
+```sh
+mjguard serve panda --http --require-confirmation --lang zh-TW --poses poses.json
+```
+
+```js
+// A console: show the ghost path, ask the person, then run it, and follow along.
+const events = new EventSource("/events");
+events.addEventListener("progress", (e) => drawArm(JSON.parse(e.data).state));
+const preview = await call("move_to", { x_mm: 450, y_mm: 100, z_mm: 250 });
+if (!preview.ok) showMessage(preview.refusal.message_human);
+else if (await confirm(drawGhost(preview.plan.path_mm))) await call("execute", { plan_id: preview.plan_id });
+```
 
 ## Real hardware
 
@@ -161,7 +214,7 @@ ships the MuJoCo simulator transport. A real arm needs a transport for its drive
 MCP surface stay the same. [roarm-mcp](https://github.com/SamKo88927/roarm-mcp) is the RoArm-M3 application this
 library was extracted from.
 
-`stop()` is a software stop. On real hardware a physical e-stop is the only real emergency stop.
+`stop()` and `pause()` are software stops. On real hardware a physical e-stop is the only real emergency stop.
 
 ## Limits of the method
 

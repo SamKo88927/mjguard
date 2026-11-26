@@ -9,6 +9,7 @@ import json
 import logging
 import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -44,9 +45,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     serve.add_argument("--allow-remote", action="store_true", help="allow a non-loopback --host (no authentication)")
     serve.add_argument("--realtime", action="store_true", help="run the simulation in real time")
     serve.add_argument("--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    serve.add_argument(
+        "--lang", choices=["en", "zh-TW"], help="language of message_human in refusals (config [ui] lang)"
+    )
+    serve.add_argument(
+        "--require-confirmation",
+        action="store_true",
+        help="motion tools only preview; a motion runs only through execute(plan_id) (config [ui])",
+    )
+    serve.add_argument("--poses", type=Path, help="load and save named poses in this JSON file")
     args = parser.parse_args(argv)
 
     from .config import ConfigError, load
+    from .poses import PoseStore
 
     try:
         # Resolving a Menagerie preset may clone it on first use, and the downloader prints to stdout. In stdio mode
@@ -69,6 +80,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
             print(json.dumps(report, indent=2, ensure_ascii=False))
             return 0 if refusal is None else 1
+        # The flags can only turn confirmation on, never off.
+        ui = replace(
+            config.ui,
+            lang=args.lang or config.ui.lang,
+            require_confirmation=config.ui.require_confirmation or args.require_confirmation,
+        )
+        config = replace(config, ui=ui)
+        poses = PoseStore(config.joints, args.poses)
     except ConfigError as exc:
         print(f"mjguard: config error: {exc}", file=sys.stderr)
         return 2
@@ -84,7 +103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from .executor import Executor, SimTransport, Trace
     from .server import LogLevel, create_server
 
-    executor = Executor(config, SimTransport(config, realtime=args.realtime), Trace(args.trace))
+    executor = Executor(config, SimTransport(config, realtime=args.realtime), Trace(args.trace), poses=poses)
     server = create_server(executor, args.host, args.port, cast(LogLevel, args.log_level))
     try:
         server.run(transport="streamable-http" if args.http else "stdio")

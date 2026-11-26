@@ -25,6 +25,13 @@ CODES = {
     "STOPPED": "the motion was stopped before it finished",
     "ENVELOPE_BREACH": "the measured arm left the envelope during the motion and was halted",
     "INTERNAL_ERROR": "a fault inside the server; the arm is free for the next call",
+    "PAUSED": "the motion was paused; resume() continues it after a fresh check, stop() discards it",
+    "NOTHING_TO_RESUME": "there is no paused motion to resume",
+    "PLAN_UNKNOWN": "no previewed plan has this id",
+    "PLAN_EXPIRED": "the previewed plan is too old; preview it again",
+    "PLAN_USED": "the previewed plan already ran; a plan runs at most once",
+    "PLAN_STALE": "the arm is no longer where the previewed plan starts; preview it again",
+    "POSE_UNKNOWN": "no saved pose has this name",
 }
 
 
@@ -46,6 +53,7 @@ class Refusal:
 class Plan:
     waypoints: list[Vec]
     min_clearance_mm: float
+    min_obstacle_gap_mm: float = math.inf
 
 
 LINE_STEP_M = 0.005
@@ -111,24 +119,33 @@ class Guard:
     def check_configuration(
         self, q: Vec, gripper: Vec | None = None, thresholds: tuple[float, float] | None = None
     ) -> tuple[Refusal | None, float]:
+        refusal, clearance, _ = self._check(q, gripper, thresholds)
+        return refusal, clearance
+
+    def _check(
+        self, q: Vec, gripper: Vec | None = None, thresholds: tuple[float, float] | None = None
+    ) -> tuple[Refusal | None, float, float]:
+        """(refusal, floor clearance mm, obstacle gap mm) for one configuration."""
         floor_mm, obstacle_mm = thresholds or (self.limits.planning_clearance_mm, self.limits.planning_obstacle_mm)
         refusal = self.check_joints(q)
         if refusal is not None:
-            return refusal, math.nan
+            return refusal, math.nan, math.nan
         for c in self.model.contacts(q, gripper):
             if c.floor:
                 part = c.b if c.a == self.config.floor_geom else c.a
-                return Refusal("TABLE_COLLISION", f"{part} would touch the floor"), 0.0
-            return Refusal("COLLISION", f"{c.a} would touch {c.b} ({c.depth_mm} mm deep)", {"a": c.a, "b": c.b}), 0.0
+                return Refusal("TABLE_COLLISION", f"{part} would touch the floor", {"part": part}), 0.0, math.nan
+            refusal = Refusal("COLLISION", f"{c.a} would touch {c.b} ({c.depth_mm} mm deep)", {"a": c.a, "b": c.b})
+            return refusal, 0.0, math.nan
         clearance = self.model.clearance_mm(q, gripper)
         if clearance < floor_mm:
             return (
                 Refusal(
                     "TABLE_CLEARANCE",
                     f"a moving part would be {clearance:.1f} mm above the floor; plans keep at least {floor_mm:.4g} mm",
-                    {"clearance_mm": round(clearance, 1)},
+                    {"clearance_mm": round(clearance, 1), "limit_mm": round(floor_mm, 1)},
                 ),
                 clearance,
+                math.nan,
             )
         gap, part, obstacle = self.model.obstacle_clearance(q, gripper)
         if gap < obstacle_mm:
@@ -136,13 +153,19 @@ class Guard:
                 Refusal(
                     "OBSTACLE_CLEARANCE",
                     f"{part} would be {max(gap, 0):.1f} mm from {obstacle}; plans keep at least {obstacle_mm:.4g} mm",
-                    {"part": part, "obstacle": obstacle, "gap_mm": round(max(gap, 0), 1)},
+                    {
+                        "part": part,
+                        "obstacle": obstacle,
+                        "gap_mm": round(max(gap, 0), 1),
+                        "limit_mm": round(obstacle_mm, 1),
+                    },
                 ),
                 clearance,
+                gap,
             )
         pos, _ = self.model.tool(q)
         refusal = self.check_workspace(pos)
-        return refusal, clearance
+        return refusal, clearance, gap
 
     def check_workspace(self, pos: Vec) -> Refusal | None:
         for axis, (low, high) in self.limits.workspace_mm.items():
@@ -158,20 +181,45 @@ class Guard:
         return None
 
     # ------------------------------------------------------------------ paths
-    def check_path(self, start: Vec, goal: Vec, gripper: Vec | None = None) -> Plan | Refusal:
+    def check_waypoints(
+        self,
+        start: Vec,
+        waypoints: list[Vec],
+        start_gripper: Vec | None = None,
+        gripper_goal: Vec | None = None,
+    ) -> Plan | Refusal:
+        """Check every waypoint of a path that starts at `start` (the measured arm), with the thresholds `start` allows.
+
+        With `gripper_goal` the gripper moves along with the waypoints, the way a transport commands it: at waypoint i
+        of n it is at `start_gripper + (gripper_goal - start_gripper) * (i + 1) / n`. This is the one place a path is
+        checked: fresh plans, previewed plans before they run, and resumed remainders all come through here.
+        """
+        if not waypoints:
+            return Refusal("BAD_TARGET", "the path has no waypoints")
+        start = np.asarray(start, float)
+        limits = self.thresholds(start, start_gripper)
+        lowest = closest = math.inf
+        n = len(waypoints)
+        for i, q in enumerate(waypoints):
+            g = start_gripper
+            if gripper_goal is not None and start_gripper is not None:
+                g = start_gripper + (gripper_goal - start_gripper) * ((i + 1) / n)
+            refusal, clearance, gap = self._check(np.asarray(q, float), g, limits)
+            if refusal is not None:
+                refusal.details["waypoint"] = f"{i + 1}/{n}"
+                return refusal
+            lowest = min(lowest, clearance)
+            closest = min(closest, gap)
+        return Plan(list(waypoints), lowest, closest)
+
+    def check_path(
+        self, start: Vec, goal: Vec, gripper: Vec | None = None, gripper_goal: Vec | None = None
+    ) -> Plan | Refusal:
         refusal = self.check_joints(goal)
         if refusal is not None:
             return refusal
-        lowest = math.inf
-        limits = self.thresholds(np.asarray(start, float), gripper)
         waypoints = interpolate(np.asarray(start, float), np.asarray(goal, float), float(np.min(self.max_step)))
-        for i, q in enumerate(waypoints):
-            refusal, clearance = self.check_configuration(q, gripper, limits)
-            if refusal is not None:
-                refusal.details["waypoint"] = f"{i + 1}/{len(waypoints)}"
-                return refusal
-            lowest = min(lowest, clearance)
-        return Plan(waypoints, lowest)
+        return self.check_waypoints(start, waypoints, gripper, gripper_goal)
 
     def solve(self, target: Vec, direction: Vec | None, current: Vec) -> Vec | Refusal:
         tol_mm = self.limits.position_tolerance_mm
@@ -262,15 +310,7 @@ class Guard:
         waypoints: list[Vec] = []
         for a, b in itertools.pairwise(sampled):
             waypoints += interpolate(a, b, float(np.min(self.max_step)))
-        lowest = math.inf
-        limits = self.thresholds(current, gripper)
-        for i, w in enumerate(waypoints):
-            refusal, clearance = self.check_configuration(w, gripper, limits)
-            if refusal is not None:
-                refusal.details["waypoint"] = f"{i + 1}/{len(waypoints)}"
-                return refusal
-            lowest = min(lowest, clearance)
-        return Plan(waypoints, lowest)
+        return self.check_waypoints(current, waypoints, gripper)
 
     def plan_pose_with_fallback(
         self, current: Vec, target: Vec, direction: Vec | None, gripper: Vec | None = None, line: bool = False
@@ -296,6 +336,7 @@ class Guard:
                 "z_mm": _mm(float(good[2]) - self.model.floor_z),
                 "tool_down": direction is not None,
                 "path": "line" if line else "joint",
+                "fraction": round(lo, 2),
                 "note": f"farthest checked-safe point on the straight line toward the target ({lo:.0%} of the way); "
                 "send it with the same tool_down and path",
             }

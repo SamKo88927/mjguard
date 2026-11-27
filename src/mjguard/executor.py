@@ -805,11 +805,12 @@ class Executor:
         clear from there? Step 0's start was checked by execute() (START_TOLERANCE, as for single plans).
 
         A later step starts where the previous step was PLANNED to end, and no transport tracks a plan exactly: under
-        physics the measured tool point settles 1-18 mm from the plan, depending on the arm. The tolerance is the
+        physics the measured tool point settles <1 to 36 mm from the plan, depending on the arm. The tolerance is the
         config's planning margin, the tracking error its plans already budget for above the hard limits: within it,
         the previous step got where it was meant to; beyond it (an arm that was blocked, slipped or never arrived),
-        the approved route no longer describes the arm. The tool point is compared, not each joint: per-joint settle
-        error varies far more between arms than the tool error does. Whatever passes, the path from the measured arm
+        the approved route no longer describes the arm. The tool point is compared, not each joint: a config budgets
+        tracking error in millimetres, and per-joint settle error (0.01 to 5 deg across arms) has no such budget to
+        compare against. Whatever passes, the path from the measured arm
         to the step's first waypoint is filled in at the guard's joint step and every waypoint is checked again.
         """
         if step.index > 0:

@@ -200,22 +200,24 @@ and step 0 must start within 0.5° (or 0.5 mm) of where the preview measured the
 the arm again:
 
 - *Is the arm where this step starts?* A later step starts where the previous step was planned to end, and no arm
-  tracks a plan exactly: under physics the measured tool point settles 1 to 18 mm from the plan, depending on the
-  robot. So the tool point may be up to the config's `planning_margin_mm` (at least 0.5 mm) from that planned end.
-  The margin is the tracking error a config already budgets for: plans keep it above the hard limits so the measured
-  arm may be that far off and stay safe. Within it, the previous step got where it was meant to; beyond it (an arm
-  that was blocked, slipped or never arrived) the route the person approved no longer describes the arm, and the
-  step is refused with `PLAN_STALE` (`off_mm`, `tolerance_mm`). The tool point is compared rather than each joint
-  because per-joint settle error varies much more between arms (0.01° to 5°) than tool error does. It cannot see a
-  pure wrist roll; the next point covers safety either way.
+  tracks a plan exactly: under physics the measured tool point settles from under 1 mm (low-cost arm) to 36 mm (Z1)
+  from the plan, depending on the robot. So the tool point may be up to the config's `planning_margin_mm` (at least
+  0.5 mm) from that planned end. The margin is the tracking error a config already budgets for: plans keep it above
+  the hard limits so the measured arm may be that far off and stay safe. Within it, the previous step got where it
+  was meant to; beyond it (an arm that was blocked, slipped or never arrived) the route the person approved no longer
+  describes the arm, and the step is refused with `PLAN_STALE` (`off_mm`, `tolerance_mm`). The tool point is
+  compared rather than each joint because the config budgets tracking error in millimetres; per-joint settle error
+  (0.01° to 5° across arms) has no such budget. It cannot see a pure wrist roll; the next point covers safety either
+  way.
 - *Is the path still clear?* The step's waypoints are checked again from the measured arm, with the gap to its first
   waypoint filled in at the guard's joint step, as `resume()` does. A box put on the table after the preview refuses
   the step that would reach it.
 
-Measured with a pick-and-place loop on every physics preset: the tolerance passes all of them at speed 0.3, and all
-but two at 0.5 and 1.0. UR5e settles 12 mm off at full speed (margin 10 mm). Kinova Gen3 really does not arrive
-(15 to 92 mm off at speed 0.5 and above; at 0.3 its own single moves can end over 100 mm off): exactly what the check
-is for.
+Measured with a pick-and-place loop on every physics preset (worst tool error / margin): every preset passes at
+speed 0.3, for example Panda 6/10, iiwa14 18/25, SO-ARM101 18/20, Z1 36/40, RoArm-M3 1/8 mm. At 0.5 all but Kinova
+Gen3 pass (UR5e 8.4/10). At 1.0 Gen3 and UR5e (12.3/10) are refused. Gen3 really does not arrive (15 to 92 mm off at
+0.5 and above; single moves can end over 100 mm off even at 0.3): exactly what the check is for. Several presets run
+close to their margin, so a heavier payload or a faster speed can make a later step stale.
 
 A refusal, breach, stop or pause halts the rest. The result has `sequence: {steps, completed, halted_at}`, one record
 per step that ran (`steps`: `index`, `tool`, `ok`, `executed`) and the `refusal` with its `details.step`. `pause()`

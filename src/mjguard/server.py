@@ -202,10 +202,15 @@ def create_server(
         return tool_result(executor.discard(plan_id))
 
     @server.tool(annotations=halt)
-    def stop() -> CallToolResult:
+    def stop(
+        latch: Annotated[
+            bool | None,
+            Field(description="Latch: refuse every motion until release_stop() (an e-stop). Default: server setting."),
+        ] = None,
+    ) -> CallToolResult:
         """Halt the running motion at the next waypoint; the arm holds where it is. Discards a paused motion.
         Software stop only."""
-        return tool_result(executor.stop())
+        return tool_result(executor.stop(latch))
 
     @server.tool(annotations=store)
     def save_pose(name: PoseName) -> CallToolResult:

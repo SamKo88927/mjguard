@@ -323,13 +323,15 @@ class Executor:
         return summary
 
     # ------------------------------------------------------------------ stopping
-    def stop(self) -> Result:
+    def stop(self, latch: bool | None = None) -> Result:
+        """Halt at the next waypoint; discard a paused motion. `latch` (default: the server's latch_stop setting)
+        also refuses every motion until release_stop(): an e-stop button latches, a plain stop button does not."""
         was_moving = self._motion.locked()
         self._stop.set()
         with self._paused_lock:
             discarded = self._paused is not None
             self._paused = None
-        if self.latch_stop:
+        if self.latch_stop if latch is None else latch:
             self._latched.set()
         result: Result = {
             "ok": True,

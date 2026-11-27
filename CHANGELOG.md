@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 (2026-11-27)
+
+- `stop(latch=...)`: latching is chosen per call, so one UI can have a plain stop button and a latching e-stop.
+  `--latch-stop` / `[ui] latch_stop` now only set the default. Found by the console's end-to-end test: with 0.4.1's
+  server-wide latch, the plain stop button also latched and refused every later motion.
+
 ## 0.4.1 (2026-11-27)
 
 Found while wiring a real UI (a web console) to 0.4.0:

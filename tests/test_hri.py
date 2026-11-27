@@ -550,3 +550,15 @@ def test_sse_ids_carry_the_server_run() -> None:
     assert parse_after("7", "abc") == 7
     assert parse_after("abc:7", "abc") == 7
     assert parse_after("old:900", "abc") == 0  # a restarted server: replay from the start, don't skip new events
+
+
+def test_stop_latch_per_call(config: RobotConfig) -> None:
+    """A plain stop button and an e-stop button on one server: only the e-stop latches."""
+    ex = Executor(config, SimTransport(config))
+    assert ex.stop()["latched"] is False
+    assert ex.move_joints({"yaw": 5})["ok"] is True
+    assert ex.stop(latch=True)["latched"] is True
+    assert ex.move_joints({"yaw": 0})["refusal"]["code"] == "STOP_LATCHED"
+    ex.release_stop()
+    latched_server = Executor(config, SimTransport(config), latch_stop=True)
+    assert latched_server.stop(latch=False)["latched"] is False  # a plain stop on a --latch-stop server

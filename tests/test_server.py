@@ -43,6 +43,7 @@ async def test_tools_and_version(executor: Executor) -> None:
             "go_to_pose",
             "list_poses",
             "delete_pose",
+            "preview_sequence",
         }
         read_only = {n for n, t in listed.items() if t.annotations and t.annotations.readOnlyHint}
         assert read_only == {"get_state", "get_limits", "list_poses"}
@@ -140,6 +141,36 @@ async def test_preview_execute_jog_poses_over_mcp(executor: Executor) -> None:
         assert isinstance(content, TextResourceContents)
         types = [e["type"] for e in json.loads(content.text)]
         assert "motion_started" in types and "pose_saved" in types and types[-1] == "refused"
+
+
+async def test_preview_sequence_over_mcp(executor: Executor) -> None:
+    server = create_server(executor)
+    async with create_connected_server_and_client_session(server._mcp_server) as client:  # pyright: ignore[reportPrivateUsage]
+        init = await client.initialize()
+        assert init.instructions is not None and "preview_sequence(steps)" in init.instructions
+        schema = {t.name: t for t in (await client.list_tools()).tools}["preview_sequence"].inputSchema
+        assert schema["properties"]["steps"]["type"] == "array" and "preview" not in json.dumps(schema["$defs"])
+        steps = [
+            {"tool": "move_to", "x_mm": 300, "y_mm": 100, "z_mm": 120},
+            {"tool": "move_to", "x_mm": 300, "y_mm": 100, "z_mm": 60, "path": "line", "speed": 0.8},
+            {"tool": "gripper", "opening": 0},
+            {"tool": "rest"},
+        ]
+        p = await client.call_tool("preview_sequence", {"steps": steps, "speed": 0.4})
+        assert p.isError is False and p.structuredContent is not None
+        assert [s["speed"] for s in p.structuredContent["steps"]] == [0.4, 0.8, 0.4, 0.4]
+        r = await client.call_tool("execute", {"plan_id": p.structuredContent["plan_id"]})
+        assert r.isError is False and r.structuredContent is not None
+        assert r.structuredContent["sequence"]["completed"] == [0, 1, 2, 3]
+        nested = await client.call_tool("preview_sequence", {"steps": [{"tool": "rest", "preview": True}]})
+        assert nested.isError is True  # the schema has no nested preview flag
+        jog = await client.call_tool("preview_sequence", {"steps": [{"tool": "jog", "dz_mm": 5}]})
+        assert jog.isError is True
+        low = {"tool": "move_to", "x_mm": 300, "y_mm": 0, "z_mm": 0}
+        bad = await client.call_tool("preview_sequence", {"steps": [low]})
+        assert bad.isError is True and bad.structuredContent is not None
+        assert bad.structuredContent["refusal"]["details"]["step"] == 0
+        assert bad.structuredContent["refusal"]["message_human"].startswith("Step 1: ")
 
 
 async def test_require_confirmation_is_in_the_instructions(config: RobotConfig) -> None:

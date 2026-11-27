@@ -11,7 +11,7 @@ from typing import Any
 
 from .config import LANGS
 
-__all__ = ["LANGS", "humanize", "refusal_text", "suggestion_text"]
+__all__ = ["LANGS", "humanize", "refusal_text", "step_prefix", "suggestion_text"]
 Details = dict[str, Any]
 
 
@@ -140,9 +140,19 @@ def suggestion_text(suggestion: dict[str, Any], lang: str) -> str:
     return f"A safe spot on the way is {where}{part}."
 
 
+def step_prefix(details: Details, lang: str) -> str:
+    """A sequence refusal names its step, counted from 1 for people (details.step is 0-based)."""
+    step = details.get("step")
+    if not isinstance(step, int) or isinstance(step, bool):
+        return ""
+    return f"第 {step + 1} 步：" if lang == "zh-TW" else f"Step {step + 1}: "
+
+
 def humanize(refusal: dict[str, Any], lang: str) -> dict[str, Any]:
     """Add `message_human` (and `suggestion.human`) to a refusal dict, in place; returns it."""
-    refusal["message_human"] = refusal_text(str(refusal.get("code")), refusal.get("details") or {}, lang)
+    details = refusal.get("details") or {}
+    text = refusal_text(str(refusal.get("code")), details, lang)
+    refusal["message_human"] = step_prefix(details, lang) + text
     suggestion = refusal.get("suggestion")
     if isinstance(suggestion, dict):
         suggestion["human"] = suggestion_text(suggestion, lang)  # pyright: ignore[reportUnknownArgumentType]

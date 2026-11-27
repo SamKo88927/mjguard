@@ -12,13 +12,13 @@ import anyio
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecurityMiddleware
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
 
 from . import __version__
 from .events import Event
-from .executor import JOG_MAX_JOINT, JOG_MAX_MM, Executor
+from .executor import JOG_MAX_JOINT, JOG_MAX_MM, MAX_SEQUENCE_STEPS, Executor
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
@@ -33,6 +33,10 @@ Motion tools take preview=true to plan and check without moving: the result has 
 execute(plan_id) runs that plan once if the arm has not moved since. {confirmation}pause() halts and keeps the rest
 of the motion. A PAUSED result means a person paused the arm: do not call resume() or start another motion unless
 you are asked to.
+
+For a task of several motions (pick a part, put it in a bin), preview_sequence(steps) plans and checks up to
+{max_steps} steps in order, each from where the step before it is predicted to end, and returns one plan_id for all
+of them; nothing moves. A refusal names the failing step (details.step, 0-based); fix that step and preview again.
 """
 CONFIRMATION = """This server requires confirmation: every motion tool only previews (executed=false, nothing moved) \
 until execute(plan_id) is called. """
@@ -52,6 +56,56 @@ Preview = Annotated[
 # a schema error.
 JogMm = Annotated[float, Field(allow_inf_nan=False, description=f"Millimetres; at most {JOG_MAX_MM:g} mm in total.")]
 PoseName = Annotated[str, Field(max_length=100, description="1-40 letters, digits, '_' or '-'.")]
+StepSpeed = Annotated[
+    float | None,
+    Field(
+        allow_inf_nan=False,
+        ge=0.05,
+        le=1.0,
+        description="Fraction of the maximum joint speed (default: the sequence's speed).",
+    ),
+]
+
+
+class _Step(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # no nested preview flag: a sequence is always a preview
+
+
+class MoveToStep(_Step):
+    tool: Literal["move_to"]
+    x_mm: Mm
+    y_mm: Mm
+    z_mm: Annotated[Mm, Field(description="Height of the tool point above the floor or table.")]
+    tool_down: bool = True
+    path: Literal["joint", "line"] = "joint"
+    speed: StepSpeed = None
+
+
+class MoveJointsStep(_Step):
+    tool: Literal["move_joints"]
+    joints: dict[str, float]
+    speed: StepSpeed = None
+
+
+class GripperStep(_Step):
+    tool: Literal["gripper"]
+    opening: Annotated[float, Field(allow_inf_nan=False, ge=0.0, le=1.0, description="0 closed, 1 open.")]
+    speed: StepSpeed = None
+
+
+class RestStep(_Step):
+    tool: Literal["rest"]
+    speed: StepSpeed = None
+
+
+class GoToPoseStep(_Step):
+    tool: Literal["go_to_pose"]
+    name: PoseName
+    include_gripper: bool = False
+    speed: StepSpeed = None
+
+
+Step = Annotated[MoveToStep | MoveJointsStep | GripperStep | RestStep | GoToPoseStep, Field(discriminator="tool")]
 
 
 def tool_result(payload: dict[str, Any]) -> CallToolResult:
@@ -69,7 +123,11 @@ def create_server(
     name = executor.config.name
     server = FastMCP(
         f"mjguard-{name}",
-        instructions=INSTRUCTIONS.format(name=name, confirmation=CONFIRMATION if executor.require_confirmation else ""),
+        instructions=INSTRUCTIONS.format(
+            name=name,
+            confirmation=CONFIRMATION if executor.require_confirmation else "",
+            max_steps=MAX_SEQUENCE_STEPS,
+        ),
         host=host,
         port=port,
         log_level=log_level,
@@ -169,12 +227,34 @@ def create_server(
         """Move one joint by a small amount relative to where it is."""
         return await in_thread(lambda: executor.jog_joint(joint, delta, speed, preview))
 
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False))
+    async def preview_sequence(
+        steps: Annotated[
+            list[Step],
+            Field(
+                description=f"1 to {MAX_SEQUENCE_STEPS} motions in order. Each is {{tool, ...that tool's "
+                "arguments}}: move_to, move_joints, gripper, rest or go_to_pose. No preview flag."
+            ),
+        ],
+        speed: Annotated[
+            float | None,
+            Field(allow_inf_nan=False, ge=0.05, le=1.0, description="Default speed for steps that set none (0.5)."),
+        ] = None,
+    ) -> CallToolResult:
+        """Plan and check several motions in order, without moving: each step starts where the one before it is
+        predicted to end (joints and gripper). Returns one plan_id for the whole sequence with a summary per step
+        and totals, or a refusal naming the first failing step (details.step, 0-based) with its suggestion.
+        execute(plan_id) runs the steps once, in order, checking each again right before it runs."""
+        payload = [step.model_dump(exclude_none=True) for step in steps]
+        return await in_thread(lambda: executor.preview_sequence(payload, speed))
+
     @server.tool(annotations=act)
     async def execute(
         plan_id: Annotated[str, Field(max_length=64, description="plan_id from a preview.")],
     ) -> CallToolResult:
-        """Run a previewed plan. Each plan runs at most once, within 60 s of the preview, and only if the arm is
-        still where the plan starts; it is checked again against the envelope before it moves."""
+        """Run a previewed plan or sequence. Each plan runs at most once, within 60 s of the preview, and only if the
+        arm is still where the plan starts; it is checked again against the envelope before it moves. A sequence
+        checks each step again before it runs and stops at the first step that fails."""
         return await in_thread(lambda: executor.execute(plan_id))
 
     @server.tool(annotations=halt)
@@ -253,7 +333,8 @@ def create_server(
     @server.resource("mjguard://events/latest", mime_type="application/json")
     def events_resource() -> str:
         """The last 50 events: motion_started, progress, motion_finished, refused, stopped, paused, resumed,
-        breach, pose_saved, pose_deleted."""
+        breach, pose_saved, pose_deleted, stop_released, sequence_started, step_started, step_finished,
+        sequence_finished."""
         return json.dumps(executor.events.latest(50), ensure_ascii=False, default=str)
 
     security = TransportSecurityMiddleware(server.settings.transport_security)

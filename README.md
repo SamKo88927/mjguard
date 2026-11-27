@@ -148,7 +148,8 @@ claude mcp add ur5e -- uvx mjguard serve ur5e
 
 `get_state`, `get_limits`, `move_to(x_mm, y_mm, z_mm, tool_down=true, speed, path="joint")`,
 `move_joints({name: value})`, `gripper(opening)` (when configured), `rest`, `stop`; for people and UIs also
-`jog`, `jog_joint`, `execute`, `pause`, `resume`, `save_pose`, `go_to_pose`, `list_poses`, `delete_pose` (below).
+`jog`, `jog_joint`, `execute`, `preview_sequence`, `pause`, `resume`, `save_pose`, `go_to_pose`, `list_poses`,
+`delete_pose`, `discard`, `release_stop` (below).
 
 `path="line"` makes the tool point travel a straight line, sampled every 5 mm, with IK solved point to point so the
 arm cannot flip configuration mid-way; a line that crosses a singularity or leaves reach is refused, and a refusal's
@@ -169,6 +170,62 @@ and only if the measured arm is still within 0.5° (or 0.5 mm) of the plan's sta
 With `--require-confirmation` (or `[ui] require_confirmation = true`) every motion tool only previews, so nothing
 moves until someone calls `execute`.
 
+**Sequences.** A task of several motions ("pick the part and put it in the bin") is one preview and one approval.
+`preview_sequence(steps, speed=0.5)` takes 1 to 10 steps, each `{"tool": ..., ...that tool's arguments}` with tool
+`move_to`, `move_joints`, `gripper`, `rest` or `go_to_pose` (no `preview` flag; jogs are relative and stay single).
+Each step is planned from where the step before it is predicted to end (arm joints and gripper), by the same planner
+and the same checks as that tool on its own, so a sequence cannot do anything its steps could not do one by one.
+Nothing moves. The result is one `plan_id` with `steps` (per step: `index`, `tool`, `arguments` and the same summary
+as a single preview, with a shorter `path_mm`) and `totals` (duration, lowest clearance and obstacle gap, start and
+end tool pose, final gripper opening), or a refusal for the first failing step: `details.step` is its 0-based index,
+`message_human` starts 「第 3 步：」/ "Step 3:", and a suggestion carries `step` and was planned from that step's
+predicted start, so it can replace the step as is. A refused sequence stores nothing.
+
+```python
+r = executor.preview_sequence(
+    [
+        {"tool": "move_to", "x_mm": 300, "y_mm": 100, "z_mm": 120},  # above the part
+        {"tool": "move_to", "x_mm": 300, "y_mm": 100, "z_mm": 60, "path": "line"},  # down
+        {"tool": "gripper", "opening": 0},  # grip
+        {"tool": "move_to", "x_mm": 300, "y_mm": 100, "z_mm": 120, "path": "line"},  # up
+        {"tool": "move_to", "x_mm": 250, "y_mm": -150, "z_mm": 120},  # above the bin
+        {"tool": "gripper", "opening": 1},  # let go
+    ]
+)
+executor.execute(r["plan_id"])
+```
+
+`execute(plan_id)` runs a sequence with the same one-shot, 60 s, `discard` and `STOP_LATCHED` rules as a single plan,
+and step 0 must start within 0.5° (or 0.5 mm) of where the preview measured the arm. Then, before each step, it reads
+the arm again:
+
+- *Is the arm where this step starts?* A later step starts where the previous step was planned to end, and no arm
+  tracks a plan exactly: under physics the measured tool point settles 1 to 18 mm from the plan, depending on the
+  robot. So the tool point may be up to the config's `planning_margin_mm` (at least 0.5 mm) from that planned end.
+  The margin is the tracking error a config already budgets for: plans keep it above the hard limits so the measured
+  arm may be that far off and stay safe. Within it, the previous step got where it was meant to; beyond it (an arm
+  that was blocked, slipped or never arrived) the route the person approved no longer describes the arm, and the
+  step is refused with `PLAN_STALE` (`off_mm`, `tolerance_mm`). The tool point is compared rather than each joint
+  because per-joint settle error varies much more between arms (0.01° to 5°) than tool error does. It cannot see a
+  pure wrist roll; the next point covers safety either way.
+- *Is the path still clear?* The step's waypoints are checked again from the measured arm, with the gap to its first
+  waypoint filled in at the guard's joint step, as `resume()` does. A box put on the table after the preview refuses
+  the step that would reach it.
+
+Measured with a pick-and-place loop on every physics preset: the tolerance passes all of them at speed 0.3, and all
+but two at 0.5 and 1.0. UR5e settles 12 mm off at full speed (margin 10 mm). Kinova Gen3 really does not arrive
+(15 to 92 mm off at speed 0.5 and above; at 0.3 its own single moves can end over 100 mm off): exactly what the check
+is for.
+
+A refusal, breach, stop or pause halts the rest. The result has `sequence: {steps, completed, halted_at}`, one record
+per step that ran (`steps`: `index`, `tool`, `ok`, `executed`) and the `refusal` with its `details.step`. `pause()`
+keeps the remaining steps: `get_state` shows `paused_motion.sequence` (`step`, `steps`, `remaining_steps`), and
+`resume()` re-checks the paused step from the measured arm, then runs the rest, each checked as above. A refused
+resume stays paused. `stop()`, or any new motion, discards the remaining steps (`discarded_sequence_steps`).
+Events: `sequence_started` (plan_id, steps, tools, duration), `step_started` / `step_finished` (`index`, `of`,
+`ok`, `code`), `sequence_finished` (`ok`, `completed`, `halted_at`), and the usual motion events, which carry
+`step` and `steps` while a sequence runs.
+
 **Jog.** `jog(dx_mm, dy_mm, dz_mm)` moves the tool point in a straight line, at most 50 mm, keeping the tool's
 direction (or pointing it down with `tool_down=true`). `jog_joint(joint, delta)` moves one joint by at most 10° (or
 10 mm). Both are checked like any move; a refused jog's suggestion is an absolute point for `move_to`.
@@ -185,7 +242,8 @@ continues, or refuses with the reason and stays paused. `stop()` or any new moti
 
 **Events.** `executor.events` is an in-process bus: `motion_started`, `progress` (at most 10 Hz, with tool pose,
 joints and clearance), `motion_finished`, `refused`, `stopped`, `paused`, `resumed`, `breach`, `pose_saved`,
-`pose_deleted`. Subscribe in Python with `events.subscribe(callback)` or `events.subscribe_queue()`; read the last
+`pose_deleted`, `stop_released`, and for sequences `sequence_started`, `step_started`, `step_finished`,
+`sequence_finished`. Subscribe in Python with `events.subscribe(callback)` or `events.subscribe_queue()`; read the last
 50 from `mjguard://events/latest`; or, with `--http`, stream them as server-sent events from `GET /events`
 (`Last-Event-ID` or `?after=SEQ` replays recent ones). The endpoint has the same loopback-only rule and Host/Origin
 checks as the MCP endpoint; serve the UI from the same origin or proxy it. Callback subscribers run on their own thread, never the arm's, so a slow UI cannot delay a stop.

@@ -32,6 +32,10 @@ EVENT_TYPES = (
     "pose_saved",
     "pose_deleted",
     "stop_released",
+    "sequence_started",
+    "step_started",
+    "step_finished",
+    "sequence_finished",
 )
 
 

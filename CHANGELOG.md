@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.5.0 (2026-11-27)
+
+Multi-step tasks: "pick the part and put it in the bin" is one preview and one approval. Nothing widens the envelope.
+
+- `preview_sequence(steps, speed)` (Python and MCP): 1 to 10 steps of `move_to`, `move_joints`, `gripper`, `rest` or
+  `go_to_pose`, each planned from the predicted end of the step before it (joints and gripper) by the same planner
+  and checks as that tool alone. Returns one `plan_id`, a summary per step (with a shorter tool path) and `totals`;
+  or a refusal for the first failing step (`details.step`, 0-based; `message_human` 「第 N 步：」; its suggestion,
+  planned from that step's start, carries `step`). Malformed steps (unknown tool, a jog, a `preview` flag, missing or
+  unknown arguments) are `BAD_TARGET`. A refused sequence stores nothing.
+- `execute(plan_id)` runs a sequence once, within the TTL, refusing a latched stop and a stale step 0 like any plan.
+  Before each later step the measured tool point must be within the config's `planning_margin_mm` (at least 0.5 mm)
+  of where the previous step was planned to end, else `PLAN_STALE` with `off_mm` and `tolerance_mm`; then the step's
+  waypoints are checked again from the measured arm (the gap to its first waypoint filled in, as `resume()` does).
+  Why the margin: it is the tracking error each config already budgets for above the hard limits. Measured on every
+  physics preset with a pick-and-place loop: all pass at speed 0.3; UR5e (12 mm vs 10 at speed 1.0) and Kinova Gen3
+  (15 to 92 mm at 0.5 and above, it does not arrive) are refused. A per-joint tolerance was rejected: settle error
+  per joint ranges 0.01° to 5° between arms.
+- A refusal, breach, stop or pause halts the remaining steps; the result lists `sequence.completed`, `halted_at` and
+  one record per step that ran. `pause()` keeps the remaining steps (`get_state().paused_motion.sequence`); `resume()`
+  re-checks and continues them; `stop()` or a new motion discards them (`discarded_sequence_steps`).
+- Events `sequence_started`, `step_started`, `step_finished`, `sequence_finished`; motion events carry `step` and
+  `steps` during a sequence. A step refused mid-run publishes `refused` with its step.
+- The motion tools and sequence steps now share one planner per tool.
+- Found while measuring the tolerance, not fixed here: on Kinova Gen3 under physics a single `move_to` can report
+  `ok: true` with 100 to 190 mm tool tracking error. The envelope held (the monitor checks clearance, not arrival),
+  but the arm did not get there.
+
 ## 0.4.2 (2026-11-27)
 
 - `stop(latch=...)`: latching is chosen per call, so one UI can have a plain stop button and a latching e-stop.

@@ -189,6 +189,19 @@ def create_server(
         return await in_thread(executor.resume)
 
     @server.tool(annotations=halt)
+    def release_stop() -> CallToolResult:
+        """Clear a latched stop (servers run with --latch-stop) so motions are accepted again. Nothing moves.
+        Only call it when a person asks to release the stop."""
+        return tool_result(executor.release_stop())
+
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False))
+    def discard(
+        plan_id: Annotated[str, Field(max_length=64, description="plan_id from a preview.")],
+    ) -> CallToolResult:
+        """Forget a previewed plan so it can never run (a person rejected it). Nothing moves."""
+        return tool_result(executor.discard(plan_id))
+
+    @server.tool(annotations=halt)
     def stop() -> CallToolResult:
         """Halt the running motion at the next waypoint; the arm holds where it is. Discards a paused motion.
         Software stop only."""
@@ -249,9 +262,9 @@ def create_server(
             return rejected
         raw_after = request.headers.get("last-event-id") or request.query_params.get("after")
         try:
-            after = int(raw_after) if raw_after is not None else None
+            after = parse_after(raw_after, executor.events.boot)
         except ValueError:
-            return Response("after must be an integer", status_code=400)
+            return Response("after must be an integer or an event id BOOT:SEQ", status_code=400)
         return StreamingResponse(
             sse(executor, after),
             media_type="text/event-stream",
@@ -261,9 +274,20 @@ def create_server(
     return server
 
 
+def parse_after(raw: str | None, boot: str) -> int | None:
+    """`SEQ`, or an SSE id `BOOT:SEQ`. An id from an earlier server run (another boot) replays from the start:
+    seq restarts at 1 when the server restarts, so an old seq would otherwise hide every new event."""
+    if raw is None:
+        return None
+    if ":" in raw:
+        their_boot, _, seq = raw.partition(":")
+        return int(seq) if their_boot == boot else 0
+    return int(raw)
+
+
 def sse_format(event: Event) -> str:
     data = json.dumps(event, ensure_ascii=False, default=str)
-    return f"id: {event['seq']}\nevent: {event['type']}\ndata: {data}\n\n"
+    return f"id: {event.get('boot', '')}:{event['seq']}\nevent: {event['type']}\ndata: {data}\n\n"
 
 
 async def sse(executor: Executor, after: int | None, heartbeat_s: float = SSE_HEARTBEAT_S) -> AsyncIterator[str]:

@@ -49,6 +49,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--lang", choices=["en", "zh-TW"], help="language of message_human in refusals (config [ui] lang)"
     )
     serve.add_argument(
+        "--latch-stop",
+        action="store_true",
+        help="stop() latches: every motion is refused until release_stop() (for a UI e-stop button)",
+    )
+    serve.add_argument(
         "--require-confirmation",
         action="store_true",
         help="motion tools only preview; a motion runs only through execute(plan_id) (config [ui])",
@@ -85,6 +90,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             config.ui,
             lang=args.lang or config.ui.lang,
             require_confirmation=config.ui.require_confirmation or args.require_confirmation,
+            latch_stop=config.ui.latch_stop or args.latch_stop,
         )
         config = replace(config, ui=ui)
         poses = PoseStore(config.joints, args.poses)

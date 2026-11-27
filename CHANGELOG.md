@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.1 (2026-11-27)
+
+Found while wiring a real UI (a web console) to 0.4.0:
+
+- `discard(plan_id)`: a rejected preview can no longer run. Before, rejecting in the UI left the plan executable for
+  60 s.
+- `--latch-stop` / `[ui] latch_stop`: `stop()` latches; every motion, `execute` and `resume` is refused with
+  `STOP_LATCHED` until `release_stop()`. Previews still work. `get_state` shows `stop_latched`. Off by default.
+- A stop while idle now publishes a `stopped` event, so every client sees an e-stop pressed elsewhere.
+- SSE ids are `BOOT:SEQ`. After a server restart `seq` starts at 1 again; an id from an earlier run now replays from
+  the start instead of hiding every new event.
+- zh-TW obstacle message: a space only between Chinese and a Latin name (「會太靠近 bin」, 「會太靠近零件盒」).
+- Pose names: any script's letters are accepted (as before); the message and docs now say so.
+
 ## 0.4.0 (2026-11-26)
 
 Human-robot interaction: a UI, phone app or voice front end can sit on top of mjguard. Everything below goes through

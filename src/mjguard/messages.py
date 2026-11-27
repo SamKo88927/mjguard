@@ -67,7 +67,10 @@ def _zh_obstacle(d: Details) -> str:
     short = _short(d, "gap_mm")
     tail = f"（還差 {_mm(short)} mm）" if short is not None else ""
     name = _obstacle(d)
-    return f"會太靠近{f' {name}' if name else '障礙物'}{tail}，已停止規劃"
+    if not name:
+        return f"會太靠近障礙物{tail}，已停止規劃"
+    gap = " " if name[0].isascii() else ""  # a space between Chinese and Latin text, none before a Chinese name
+    return f"會太靠近{gap}{name}{tail}，已停止規劃"
 
 
 TEMPLATES: dict[str, dict[str, Template]] = {
@@ -91,6 +94,7 @@ TEMPLATES: dict[str, dict[str, Template]] = {
         "PLAN_USED": lambda d: "That preview already ran. Preview again.",
         "PLAN_STALE": lambda d: "The arm has moved since the preview. Preview again.",
         "POSE_UNKNOWN": lambda d: f"No saved pose called {d.get('name', '')}.".replace("  ", " "),
+        "STOP_LATCHED": lambda d: "Stopped. Release the stop before moving again.",
     },
     "zh-TW": {
         "JOINT_LIMIT": lambda d: f"關節 {d.get('joint', '')} 會超出可動範圍，已停止規劃",
@@ -112,6 +116,7 @@ TEMPLATES: dict[str, dict[str, Template]] = {
         "PLAN_USED": lambda d: "這個預覽已經執行過，請重新預覽",
         "PLAN_STALE": lambda d: "手臂已經不在預覽的起點，請重新預覽",
         "POSE_UNKNOWN": lambda d: f"沒有叫做「{d.get('name', '')}」的姿勢",
+        "STOP_LATCHED": lambda d: "已停止，解除停止後才能再動",
     },
 }
 

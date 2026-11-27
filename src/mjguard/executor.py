@@ -194,6 +194,7 @@ class Executor:
         *,
         lang: str | None = None,
         require_confirmation: bool | None = None,
+        latch_stop: bool | None = None,
         plan_ttl_s: float = PLAN_TTL_S,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -209,6 +210,8 @@ class Executor:
         self.require_confirmation = (
             config.ui.require_confirmation if require_confirmation is None else require_confirmation
         )
+        self.latch_stop = config.ui.latch_stop if latch_stop is None else latch_stop
+        self._latched = threading.Event()
         self.plan_ttl_s = plan_ttl_s
         self.clock = clock
         self._monitor = ArmModel(config)  # only used inside the motion lock
@@ -252,6 +255,7 @@ class Executor:
             "backend": self.transport.name,
             "moving": self._motion.locked(),
             "paused": self._paused is not None,
+            "stop_latched": self._latched.is_set(),
             "tool": {"x_mm": x, "y_mm": y, "z_mm": z, "axis": [round(float(v), 3) for v in axis]},
             "joints": self._joints_out(q),
             "min_clearance_mm": round(clearance, 1),
@@ -325,16 +329,49 @@ class Executor:
         with self._paused_lock:
             discarded = self._paused is not None
             self._paused = None
+        if self.latch_stop:
+            self._latched.set()
         result: Result = {
             "ok": True,
             "was_moving": was_moving,
             "discarded_paused_motion": discarded,
+            "latched": self._latched.is_set(),
             "note": "software stop; on real hardware a physical e-stop is the only power cut",
         }
         self.trace.record("stop", {}, result)
-        if discarded and not was_moving:
-            self.events.publish("stopped", tool="stop", discarded_paused_motion=True)
+        if not was_moving:  # a moving arm's own motion publishes "stopped"; an idle stop must be visible too
+            self.events.publish(
+                "stopped", tool="stop", was_moving=False, discarded_paused_motion=discarded, latched=result["latched"]
+            )
         return result
+
+    def release_stop(self) -> Result:
+        """Clear a latched stop so motions are accepted again. Nothing moves."""
+        was_latched = self._latched.is_set()
+        self._latched.clear()
+        result: Result = {"ok": True, "was_latched": was_latched}
+        self.trace.record("release_stop", {}, result)
+        if was_latched:
+            self.events.publish("stop_released")
+        return result
+
+    def discard(self, plan_id: str) -> Result:
+        """Forget a previewed plan so it can no longer run (the UI's reject button). Nothing moves."""
+        tool, arguments = "discard", {"plan_id": plan_id}
+        if not self._motion.acquire(timeout=1.0):
+            return self._refuse(tool, arguments, "BUSY", "another motion is running; discard once it ends")
+        try:
+            existed = self._plans.pop(plan_id, None) is not None
+        finally:
+            self._motion.release()
+        result: Result = {"ok": True, "discarded": existed}
+        self.trace.record(tool, arguments, result)
+        return result
+
+    def _latched_refusal(self, tool: str, arguments: Result) -> Result | None:
+        if self._latched.is_set():
+            return self._refuse(tool, arguments, "STOP_LATCHED", "a latched stop is in force; call release_stop()")
+        return None
 
     def pause(self) -> Result:
         """Halt at the next waypoint and keep the rest of the plan for resume()."""
@@ -354,6 +391,8 @@ class Executor:
         """Plan under the motion lock; then preview (store the plan) or execute it."""
         preview = preview or self.require_confirmation
         arguments = {**arguments, "preview": preview}
+        if not preview and (latched := self._latched_refusal(tool, arguments)) is not None:
+            return latched
         if not self._motion.acquire(blocking=False):
             return self._refuse(tool, arguments, "BUSY", "another motion is running")
         try:
@@ -399,6 +438,8 @@ class Executor:
     def execute(self, plan_id: str) -> Result:
         """Run a previewed plan once: unknown, expired, used or stale plans are refused; the rest is re-checked."""
         tool, arguments = "execute", {"plan_id": plan_id}
+        if (latched := self._latched_refusal(tool, arguments)) is not None:
+            return latched
         if not self._motion.acquire(blocking=False):
             return self._refuse(tool, arguments, "BUSY", "another motion is running")
         try:
@@ -444,6 +485,8 @@ class Executor:
     def resume(self) -> Result:
         """Continue a paused motion: the path from the measured arm through the remaining waypoints is re-checked."""
         tool, arguments = "resume", {}
+        if (latched := self._latched_refusal(tool, arguments)) is not None:
+            return latched
         if not self._motion.acquire(blocking=False):
             return self._refuse(tool, arguments, "BUSY", "another motion is running")
         try:
@@ -724,7 +767,9 @@ class Executor:
         """Store where the arm is now (joints and gripper) under `name`. Nothing moves."""
         tool, args = "save_pose", {"name": name}
         if not valid_name(name):
-            return self._refuse(tool, args, "BAD_TARGET", "pose names are 1-40 letters, digits, '_' or '-'")
+            return self._refuse(
+                tool, args, "BAD_TARGET", "pose names are 1-40 letters (any script), digits, '_' or '-'"
+            )
         if not self._motion.acquire(blocking=False):
             return self._refuse(tool, args, "BUSY", "the arm is moving; save the pose once it holds still")
         try:

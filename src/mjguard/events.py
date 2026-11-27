@@ -12,6 +12,7 @@ import logging
 import queue
 import threading
 import time
+import uuid
 from collections import deque
 from collections.abc import Callable
 from typing import Any
@@ -30,6 +31,7 @@ EVENT_TYPES = (
     "breach",
     "pose_saved",
     "pose_deleted",
+    "stop_released",
 )
 
 
@@ -70,11 +72,13 @@ class EventBus:
         self._callback_subs: list[Subscription] = []
         self._queues: list[Subscription] = []
         self._seq = 0
+        self.boot = uuid.uuid4().hex[:8]
+        """Identifies this server run: seq restarts at 1 when the server restarts, so SSE ids are boot:seq."""
 
     def publish(self, type: str, **data: Any) -> Event:
         with self._lock:
             self._seq += 1
-            event: Event = {"seq": self._seq, "t": round(time.time(), 3), "type": type, **data}
+            event: Event = {"seq": self._seq, "boot": self.boot, "t": round(time.time(), 3), "type": type, **data}
             self._recent.append(event)
             queues = list(self._queues)
         for q in queues:

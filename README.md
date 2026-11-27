@@ -198,6 +198,11 @@ Suggestions get a `human` sentence too.
 reach the server can call `execute` or `resume`. If people and agents share one server, put authentication in front
 of it; the envelope itself never changes either way.
 
+**For a UI's buttons.** `discard(plan_id)` when a person rejects a preview, so it can never run. Serve with
+`--latch-stop` for an e-stop button: `stop()` then latches and nothing moves until `release_stop()`; every client
+sees the `stopped` and `stop_released` events. SSE event ids are `BOOT:SEQ`, so a client that reconnects after a
+server restart replays from the start instead of missing events.
+
 ```sh
 mjguard serve panda --http --require-confirmation --lang zh-TW --poses poses.json
 ```

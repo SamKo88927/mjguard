@@ -103,12 +103,16 @@ class Ui:
     """Language of `message_human` in refusals: en or zh-TW. `message` is always English, for models."""
     require_confirmation: bool = False
     """When true, motion tools only preview; a motion runs only through execute(plan_id)."""
+    latch_stop: bool = False
+    """When true, stop() latches: every motion is refused (STOP_LATCHED) until release_stop()."""
 
     def __post_init__(self) -> None:
         if self.lang not in LANGS:
             raise ConfigError(f"ui.lang must be one of {', '.join(LANGS)}, got {self.lang!r}")
         if not isinstance(self.require_confirmation, bool):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise ConfigError("ui.require_confirmation must be true or false")
+        if not isinstance(self.latch_stop, bool):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise ConfigError("ui.latch_stop must be true or false")
 
 
 @dataclass(frozen=True)

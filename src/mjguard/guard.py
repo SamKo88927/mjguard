@@ -32,6 +32,7 @@ CODES = {
     "PLAN_USED": "the previewed plan already ran; a plan runs at most once",
     "PLAN_STALE": "the arm is no longer where the previewed plan starts; preview it again",
     "POSE_UNKNOWN": "no saved pose has this name",
+    "STOP_LATCHED": "a latched stop is in force; nothing moves until release_stop()",
 }
 
 

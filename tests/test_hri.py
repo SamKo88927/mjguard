@@ -496,3 +496,57 @@ def test_a_new_motion_reports_that_it_replaced_a_paused_one(config: RobotConfig)
     r = ex.move_joints({"yaw": 0})
     assert r["ok"] is True and r["discarded_paused_motion"] is True
     assert ex.resume()["refusal"]["code"] == "NOTHING_TO_RESUME"
+
+
+def test_zh_tw_obstacle_names_are_spaced_only_when_latin() -> None:
+    from mjguard.messages import refusal_text
+
+    d = {"gap_mm": 5.0, "limit_mm": 15.0}
+    assert refusal_text("OBSTACLE_CLEARANCE", {**d, "obstacle": "obstacle '零件盒'"}, "zh-TW").startswith(
+        "會太靠近零件盒（"
+    )
+    assert refusal_text("OBSTACLE_CLEARANCE", {**d, "obstacle": "obstacle 'bin'"}, "zh-TW").startswith("會太靠近 bin（")
+
+
+def test_latched_stop_refuses_motion_until_released(config: RobotConfig) -> None:
+    ex = Executor(config, SimTransport(config), latch_stop=True)
+    seen: list[dict[str, Any]] = []
+    ex.events.subscribe(seen.append)
+    r = ex.stop()  # idle stop
+    assert r["latched"] is True
+    assert ex.get_state()["state"]["stop_latched"] is True
+    assert ex.move_joints({"yaw": 10})["refusal"]["code"] == "STOP_LATCHED"
+    preview = ex.move_joints({"yaw": 10}, preview=True)  # previews still work: nothing moves
+    assert preview["ok"] is True
+    assert ex.execute(preview["plan_id"])["refusal"]["code"] == "STOP_LATCHED"
+    assert ex.resume()["refusal"]["code"] == "STOP_LATCHED"
+    assert ex.release_stop()["was_latched"] is True
+    assert ex.move_joints({"yaw": 10})["ok"] is True
+    assert ex.events.flush()
+    types = [e["type"] for e in seen]
+    assert types[0] == "stopped" and "stop_released" in types  # an idle stop is visible to every client
+
+
+def test_unlatched_stop_is_the_default_and_idle_stop_publishes(executor: Executor) -> None:
+    seen: list[str] = []
+    executor.events.subscribe(lambda e: seen.append(e["type"]))
+    assert executor.stop()["latched"] is False
+    assert executor.move_joints({"yaw": 5})["ok"] is True
+    assert executor.events.flush()
+    assert seen[0] == "stopped"
+
+
+def test_discard_makes_a_preview_unusable(executor: Executor) -> None:
+    preview = executor.move_joints({"yaw": 10}, preview=True)
+    assert executor.discard(preview["plan_id"])["discarded"] is True
+    assert executor.execute(preview["plan_id"])["refusal"]["code"] == "PLAN_UNKNOWN"
+    assert executor.discard("nope")["discarded"] is False
+
+
+def test_sse_ids_carry_the_server_run() -> None:
+    from mjguard.server import parse_after
+
+    assert parse_after(None, "abc") is None
+    assert parse_after("7", "abc") == 7
+    assert parse_after("abc:7", "abc") == 7
+    assert parse_after("old:900", "abc") == 0  # a restarted server: replay from the start, don't skip new events

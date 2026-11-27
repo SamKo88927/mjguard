@@ -32,6 +32,8 @@ async def test_tools_and_version(executor: Executor) -> None:
             "gripper",
             "rest",
             "stop",
+            "release_stop",
+            "discard",
             "jog",
             "jog_joint",
             "execute",

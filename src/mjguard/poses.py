@@ -31,7 +31,7 @@ def valid_name(name: str) -> bool:
 def _validate(name: str, pose: Any, joints: tuple[str, ...]) -> Pose:
     where = f"pose {name!r}"
     if not valid_name(name):
-        raise ConfigError(f"{where}: names are 1-40 letters, digits, '_' or '-'")
+        raise ConfigError(f"{where}: names are 1-40 letters (any script), digits, '_' or '-'")
     if not isinstance(pose, dict) or not isinstance(pose.get("joints"), dict):
         raise ConfigError(f"{where}: needs a 'joints' table")
     values: dict[str, Any] = pose["joints"]

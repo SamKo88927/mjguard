@@ -33,6 +33,7 @@ CODES = {
     "PLAN_STALE": "the arm is no longer where the previewed plan starts; preview it again",
     "POSE_UNKNOWN": "no saved pose has this name",
     "STOP_LATCHED": "a latched stop is in force; nothing moves until release_stop()",
+    "TARGET_MISSED": "the arm ran the checked path but settled too far from its end (overloaded or weak servos)",
 }
 
 
@@ -63,6 +64,10 @@ RELAX_TOLERANCE_MM = 0.5
 
 def _mm(v: float) -> float:
     return round(v * 1000.0, 1)
+
+
+Thresholds = tuple[float, float, dict[frozenset[int], float]]
+"""(floor clearance mm, obstacle gap mm, tolerated contact depths) a plan must respect, given where it starts."""
 
 
 class Guard:
@@ -98,14 +103,16 @@ class Guard:
                 )
         return None
 
-    def thresholds(self, start: Vec, gripper: Vec | None = None) -> tuple[float, float]:
+    def thresholds(self, start: Vec, gripper: Vec | None = None) -> Thresholds:
         """Clearance a plan must keep from the floor and from obstacles, given where the arm starts.
 
         Normally the planning values. If the measured arm already sits inside the planning margin (servo sag or
         tracking error after a move that was planned right at the margin), a plan may not get any closer than where
         it starts, but it may move: otherwise every motion, including moving away, would be refused and the arm
         would be stuck. Below the hard limit (an arm the monitor halted) the same holds: it may only move away.
-        Contacts are never relaxed, and the monitor enforces the hard limits on the measured arm.
+        Contacts the arm starts in (it was halted touching itself or the floor) may not get deeper, and no new
+        contact may appear; contacts with a configured obstacle are never tolerated. The monitor enforces the hard
+        limits on the measured arm.
         """
         floor = self.limits.planning_clearance_mm
         start_clearance = self.model.clearance_mm(start, gripper)
@@ -115,23 +122,27 @@ class Guard:
         start_gap = self.model.obstacle_clearance(start, gripper)[0]
         if start_gap < obstacle:
             obstacle = start_gap - RELAX_TOLERANCE_MM
-        return floor, obstacle
+        return floor, obstacle, self.model.contact_depths(start, gripper)
 
     def check_configuration(
-        self, q: Vec, gripper: Vec | None = None, thresholds: tuple[float, float] | None = None
+        self, q: Vec, gripper: Vec | None = None, thresholds: Thresholds | None = None
     ) -> tuple[Refusal | None, float]:
         refusal, clearance, _ = self._check(q, gripper, thresholds)
         return refusal, clearance
 
     def _check(
-        self, q: Vec, gripper: Vec | None = None, thresholds: tuple[float, float] | None = None
+        self, q: Vec, gripper: Vec | None = None, thresholds: Thresholds | None = None
     ) -> tuple[Refusal | None, float, float]:
         """(refusal, floor clearance mm, obstacle gap mm) for one configuration."""
-        floor_mm, obstacle_mm = thresholds or (self.limits.planning_clearance_mm, self.limits.planning_obstacle_mm)
+        floor_mm, obstacle_mm, tolerated = thresholds or (
+            self.limits.planning_clearance_mm,
+            self.limits.planning_obstacle_mm,
+            {},
+        )
         refusal = self.check_joints(q)
         if refusal is not None:
             return refusal, math.nan, math.nan
-        for c in self.model.contacts(q, gripper):
+        for c in self.model.contacts(q, gripper, tolerated):
             if c.floor:
                 part = c.b if c.a == self.config.floor_geom else c.a
                 return Refusal("TABLE_COLLISION", f"{part} would touch the floor", {"part": part}), 0.0, math.nan

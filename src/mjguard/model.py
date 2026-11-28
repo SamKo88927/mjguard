@@ -22,6 +22,7 @@ Vec = NDArray[np.float64]
 
 _AXES = {"x": 0, "y": 1, "z": 2}
 REST_CONTACT_TOLERANCE_M = 0.002
+START_CONTACT_TOLERANCE_M = 0.0005
 
 
 @dataclass(frozen=True)
@@ -191,6 +192,19 @@ class ArmModel:
     def _pair_label(self, k: int) -> str:
         return self.geom_label(-k - 1) if k < 0 else _name(self.m, mj.mjtObj.mjOBJ_BODY, k)
 
+    def contact_depths(
+        self, q: Sequence[float] | Vec, gripper: Sequence[float] | Vec | None = None
+    ) -> dict[frozenset[int], float]:
+        """Every penetrating contact pair (beyond the rest-pose ones) and its depth in metres."""
+        out: dict[frozenset[int], float] = {}
+        obstacles = set(self.obstacle_geoms)
+        for c in self._raw_contacts(q, gripper):
+            if c.geom1 in obstacles or c.geom2 in obstacles:
+                continue  # an obstacle contact is never tolerated, not even at the start
+            pair = self._pair(c.geom1, c.geom2)
+            out[pair] = max(out.get(pair, 0.0), -float(c.dist))
+        return out
+
     def describe_rest_contacts(self) -> list[dict[str, Any]]:
         return [
             {"bodies": sorted(self._pair_label(k) for k in pair), "depth_mm_at_rest": round(depth * 1000, 1)}
@@ -199,9 +213,15 @@ class ArmModel:
 
     @staticmethod
     def _compile(config: RobotConfig) -> Any:
-        if not config.obstacles:
+        if not config.obstacles and not config.gravity_compensation:
             return mj.MjModel.from_xml_path(str(config.mjcf))
         spec = mj.MjSpec.from_file(str(config.mjcf))
+        if config.gravity_compensation:
+            # An industrial arm's controller cancels gravity; MuJoCo decides at compile time whether to compute
+            # gravity compensation, so it is set on the spec. Affects physics only, never kinematics or checks.
+            for body in spec.bodies:
+                if body.name != "world":
+                    body.gravcomp = 1.0
         floor_z = 0.0
         for g in spec.geoms:
             if g.name == config.floor_geom:
@@ -273,12 +293,25 @@ class ArmModel:
         return pos, rot[:, self.axis] * self.axis_sign
 
     # ------------------------------------------------------------------ geometry
-    def contacts(self, q: Sequence[float] | Vec, gripper: Sequence[float] | Vec | None = None) -> list[Contact]:
-        """Penetrating contacts that involve at least one moving geom."""
+    def contacts(
+        self,
+        q: Sequence[float] | Vec,
+        gripper: Sequence[float] | Vec | None = None,
+        tolerated: dict[frozenset[int], float] | None = None,
+    ) -> list[Contact]:
+        """Penetrating contacts that involve at least one moving geom.
+
+        `tolerated` maps a contact pair to the depth (m) it may have: an arm that starts in contact (halted by the
+        monitor) may move as long as that contact gets no deeper and no new one appears.
+        """
         out: list[Contact] = []
         for c in self._raw_contacts(q, gripper):
-            allowed = self.rest_contacts.get(self._pair(c.geom1, c.geom2))
-            if allowed is not None and -float(c.dist) <= allowed + REST_CONTACT_TOLERANCE_M:
+            pair = self._pair(c.geom1, c.geom2)
+            depth = -float(c.dist)
+            allowed = self.rest_contacts.get(pair)
+            if allowed is not None and depth <= allowed + REST_CONTACT_TOLERANCE_M:
+                continue
+            if tolerated is not None and pair in tolerated and depth <= tolerated[pair] + START_CONTACT_TOLERANCE_M:
                 continue
             out.append(
                 Contact(

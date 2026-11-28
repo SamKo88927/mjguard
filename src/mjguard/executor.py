@@ -57,6 +57,10 @@ class Transport(Protocol):
     ) -> FollowResult: ...
 
 
+SETTLE_MAX_S = 2.0
+SETTLE_SPEED = 0.005  # rad/s or m/s on every arm joint
+
+
 class SimTransport:
     """MuJoCo simulation of the arm. With actuators configured it runs physics; otherwise it sets joints directly."""
 
@@ -66,6 +70,11 @@ class SimTransport:
         self.m, self.d = self.model.m, self.model.d
         self.realtime = realtime
         self.physics = bool(config.actuators)
+        self.gravity_compensation = config.gravity_compensation
+        gripper_dofs = (
+            [int(self.m.jnt_dofadr[self.m.joint(j).id]) for j in config.gripper.joints] if config.gripper else []
+        )
+        self._settle_dofs = np.concatenate([self.model.dadr, np.array(gripper_dofs, dtype=int)]).astype(int)
         self.gripper_cfg = config.gripper
         self._lock = threading.Lock()
         self.d.qpos[:] = self.model.qpos0
@@ -73,6 +82,9 @@ class SimTransport:
             for a, q in zip(self.model.actuator_ids, self.model.home, strict=True):
                 self.d.ctrl[a] = q
         mj.mj_forward(self.m, self.d)
+
+    def _step(self) -> None:
+        mj.mj_step(self.m, self.d)
 
     def read(self) -> tuple[Vec, Vec]:
         with self._lock:
@@ -110,7 +122,7 @@ class SimTransport:
                     if g is not None:
                         self._gripper_ctrl(g)
                     for _ in range(steps):
-                        mj.mj_step(self.m, self.d)
+                        self._step()
                 else:
                     self.d.qpos[self.model.qadr] = q
                     if g is not None:
@@ -123,8 +135,12 @@ class SimTransport:
                 time.sleep(max(0.0, period_s - (time.monotonic() - t0)))
         if self.physics:  # let the servos settle on the last waypoint
             with self._lock:
-                for _ in range(round(0.3 / self.m.opt.timestep)):
-                    mj.mj_step(self.m, self.d)
+                # Settle until the arm is still (like a servo reaching its target), at least 0.1 s, at most 2 s.
+                dt = self.m.opt.timestep
+                for i in range(round(SETTLE_MAX_S / dt)):
+                    self._step()
+                    if i * dt >= 0.1 and float(np.max(np.abs(self.d.qvel[self._settle_dofs]))) < SETTLE_SPEED:
+                        break
         return FollowResult(False, len(waypoints))
 
 
@@ -1005,6 +1021,7 @@ class Executor:
         q0, g0 = self.transport.read()
         start_clear = self._monitor.clearance_mm(q0, g0)
         start_gap = self._monitor.obstacle_clearance(q0, g0)[0]
+        start_contacts = self._monitor.contact_depths(q0, g0)  # an arm halted in contact may move, not dig deeper
         breach: list[str] = []
         count = [0]
         last_progress = [-math.inf]
@@ -1023,7 +1040,7 @@ class Executor:
                 breach.append(
                     f"measured {part} {max(gap, 0):.1f} mm from {obstacle}, hard limit {lim.obstacle_clearance_mm:g} mm"
                 )
-            elif contacts := self._monitor.contacts(q, g):
+            elif contacts := self._monitor.contacts(q, g, start_contacts):
                 breach.append(f"measured contact {contacts[0].a} / {contacts[0].b}")
             count[0] += 1
             now = self.clock()
@@ -1076,6 +1093,14 @@ class Executor:
                 refusal = Refusal("STOPPED", "motion was stopped before it finished")
         elif followed.stopped:
             refusal = Refusal("STOPPED", "motion was stopped before it finished")
+        elif tracking_mm > self.config.limits.arrival_tolerance:
+            # The arm ran every checked waypoint but did not get there (servo too weak, torque limit, overload).
+            refusal = Refusal(
+                "TARGET_MISSED",
+                f"the arm settled {tracking_mm:.1f} mm from the planned end (tolerance "
+                f"{self.config.limits.arrival_tolerance:g} mm); it may be overloaded or its servos too weak here",
+                {"miss_mm": tracking_mm, "limit_mm": self.config.limits.arrival_tolerance},
+            )
         else:
             refusal = None
         executed: Result = {

@@ -13,6 +13,7 @@ joints = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_j
 tcp_site = "attachment_site"
 tool_axis = "z"
 actuators = ["shoulder_pan", "shoulder_lift", "elbow", "wrist_1", "wrist_2", "wrist_3"]
+gravity_compensation = true  # the arm's own controller compensates gravity
 
 [limits]
 min_clearance_mm = 20

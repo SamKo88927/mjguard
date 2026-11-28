@@ -12,6 +12,7 @@ tcp_body = "hand"
 tcp_offset_m = [0.0, 0.0, 0.1034]
 tool_axis = "z"
 actuators = ["actuator1", "actuator2", "actuator3", "actuator4", "actuator5", "actuator6", "actuator7"]
+gravity_compensation = true  # the arm's own controller compensates gravity
 
 [gripper]
 joints = ["finger_joint1", "finger_joint2"]

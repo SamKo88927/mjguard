@@ -12,8 +12,9 @@ keyframe = "home"
 joints = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
 tcp_body = "link06"
 tool_axis = "x"
-actuators = ["motor1", "motor2", "motor3", "motor4", "motor5", "motor6"]
+# No actuators: simulated kinematically. Menagerie's Z1 position servos (30-60 N·m) cannot lift the arm
+# back from low poses against gravity, and the real Z1's own torque controller is not modelled.
 
 [limits]
 min_clearance_mm = 20
-planning_margin_mm = 40
+planning_margin_mm = 10

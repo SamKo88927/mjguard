@@ -250,10 +250,11 @@ def test_stale_start_and_stale_later_step(config: RobotConfig) -> None:
     hook_after_step(transport, 1, nudge_yaw(transport, 5))
     ex = Executor(config, transport)
     r = ex.execute(ex.preview_sequence(PICK_AND_PLACE)["plan_id"])
-    assert r["refusal"]["code"] == "PLAN_STALE" and r["refusal"]["details"]["step"] == 2
-    assert r["refusal"]["details"]["tolerance_mm"] == config.limits.planning_margin_mm
-    assert r["refusal"]["details"]["off_mm"] > 20
-    assert r["sequence"]["completed"] == [0, 1] and r["sequence"]["halted_at"] == 2
+    # Step 1 ran but the arm did not end where it was planned: caught at the end of step 1 (TARGET_MISSED), before
+    # step 2 could start from the wrong place.
+    assert r["refusal"]["code"] == "TARGET_MISSED", r["refusal"]
+    assert r["refusal"]["details"]["miss_mm"] > 20
+    assert r["sequence"]["completed"] == [0] and r["sequence"]["halted_at"] == 1
 
 
 def test_tracking_error_inside_the_planning_margin_is_not_stale(config: RobotConfig) -> None:

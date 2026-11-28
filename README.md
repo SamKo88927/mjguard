@@ -42,6 +42,7 @@ Every motion is planned into joint-space waypoints, and **every waypoint** is ch
 | Distance from every moving collision geom (meshes included) and the tool point to the floor or table, with a planning margin above the hard limit | `TABLE_CLEARANCE` |
 | Distance from every moving collision geom to every obstacle in the config, with the same planning margin | `OBSTACLE_CLEARANCE`, `COLLISION` |
 | An optional workspace box for the tool point | `WORKSPACE` |
+| After the motion: the arm actually arrived (settled within `arrival_tolerance_mm`, default the planning margin) | `TARGET_MISSED` |
 | IK convergence: a miss beyond 1 mm or 1.5° is a refusal, never a "close enough" plan | `UNREACHABLE` |
 
 While the motion runs, and again after the servos settle, a monitor checks what the robot **actually** did and

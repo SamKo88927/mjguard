@@ -13,6 +13,7 @@ joints = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joi
 tcp_site = "pinch_site"
 tool_axis = "z"
 actuators = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"]
+gravity_compensation = true  # the arm's own controller compensates gravity
 
 [limits]
 min_clearance_mm = 20

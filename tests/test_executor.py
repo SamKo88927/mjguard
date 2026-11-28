@@ -71,6 +71,7 @@ def test_monitor_halts_on_what_actually_ran(config: RobotConfig) -> None:
 
 def test_transport_fault_is_a_traced_refusal(config: RobotConfig) -> None:
     transport = SimTransport(config)
+    real_follow = transport.follow
 
     def broken(*args: object, **kwargs: object) -> object:
         raise RuntimeError("serial link dropped")
@@ -80,7 +81,7 @@ def test_transport_fault_is_a_traced_refusal(config: RobotConfig) -> None:
     r = executor.move_joints({"yaw": 10})
     assert r["refusal"]["code"] == "INTERNAL_ERROR" and "serial link dropped" in r["refusal"]["message"]
     assert executor.trace.latest(1)[0]["result"]["refusal"]["code"] == "INTERNAL_ERROR"
-    transport.follow = SimTransport(config).follow  # type: ignore[method-assign]
+    transport.follow = real_follow  # type: ignore[method-assign]
     assert executor.move_joints({"yaw": 10})["ok"] is True  # lock released
 
 

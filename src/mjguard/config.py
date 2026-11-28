@@ -32,6 +32,9 @@ class Limits:
     max_joint_speed_dps: float = 60.0
     workspace_mm: dict[str, tuple[float, float]] = field(default_factory=dict[str, tuple[float, float]])
     """Optional box for the tool point, e.g. {"x": (-400, 600)}. Missing axes are unbounded."""
+    arrival_tolerance_mm: float | None = None
+    """A motion whose tool point settles farther than this from the planned end reports TARGET_MISSED.
+    Default: planning_margin_mm (at least 5 mm), the tracking error each config already budgets for."""
     obstacle_clearance_mm: float = 10.0
     """Hard limit: the measured arm is halted if a moving collision geom gets closer to a configured obstacle.
     Plans keep this plus planning_margin_mm, like the floor."""
@@ -41,6 +44,11 @@ class Limits:
     @property
     def planning_clearance_mm(self) -> float:
         return self.min_clearance_mm + self.planning_margin_mm
+
+    @property
+    def arrival_tolerance(self) -> float:
+        """How far the settled tool point may be from the planned end before a motion reports TARGET_MISSED."""
+        return self.arrival_tolerance_mm if self.arrival_tolerance_mm is not None else max(self.planning_margin_mm, 5.0)
 
     @property
     def planning_obstacle_mm(self) -> float:
@@ -53,6 +61,10 @@ class Limits:
                 raise ConfigError(f"limits.{name} must be a positive number, got {value!r}")
         if not (math.isfinite(self.obstacle_clearance_mm) and self.obstacle_clearance_mm >= 0):
             raise ConfigError("limits.obstacle_clearance_mm must be >= 0")
+        if self.arrival_tolerance_mm is not None and not (
+            math.isfinite(self.arrival_tolerance_mm) and self.arrival_tolerance_mm > 0
+        ):
+            raise ConfigError("limits.arrival_tolerance_mm must be a positive number")
         if not (math.isfinite(self.planning_margin_mm) and self.planning_margin_mm >= 0):
             raise ConfigError("limits.planning_margin_mm must be >= 0")
         if not (math.isfinite(self.joint_margin_deg) and self.joint_margin_deg >= 0):
@@ -128,6 +140,9 @@ class RobotConfig:
     """Axis of the tool frame that points out of the tool; `move_to(tool_down=True)` points it at the floor."""
     keyframe: str | None = None
     actuators: tuple[str, ...] = ()
+    gravity_compensation: bool = False
+    """Simulate the controller cancelling gravity on the arm joints (industrial and collaborative arms do this;
+    hobby servos do not). Only affects the physics simulator."""
     """Position actuators for the arm joints, in the same order. Empty: the simulator moves joints kinematically."""
     gripper: Gripper | None = None
     obstacles: tuple[Obstacle, ...] = ()
@@ -223,6 +238,7 @@ def from_dict(data: dict[str, Any], base: Path) -> RobotConfig:
         tcp_offset_m=tuple(float(v) for v in arm.get("tcp_offset_m", (0.0, 0.0, 0.0))),  # type: ignore[arg-type]
         tool_axis=str(arm.get("tool_axis", "z")),
         actuators=tuple(arm.get("actuators", ())),
+        gravity_compensation=bool(arm.get("gravity_compensation", False)),
         gripper=gripper,
         obstacles=tuple(obstacles),
         limits=limits,

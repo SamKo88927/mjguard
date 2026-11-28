@@ -61,3 +61,18 @@ def test_describe_lists_joints_and_codes(guard: Guard) -> None:
     d = guard.describe()
     assert set(d["joints"]) == {"yaw", "shoulder", "elbow", "wrist"}
     assert "ENVELOPE_BREACH" in d["refusal_codes"]
+
+
+def test_an_arm_halted_in_contact_may_move_away_but_not_deeper(guard: Guard) -> None:
+    """The monitor can halt an arm that is already touching itself; it must not be stuck there."""
+    g = guard.model.home_gripper
+    touching = np.radians(Q["COLLISION"])
+    assert guard.check_configuration(touching, g)[0] is not None  # normally refused
+    limits = guard.thresholds(touching, g)
+    assert limits[2], "the start contact is recorded"
+    away = touching + np.radians([0, 10, 0, 0])  # shoulder up: every start contact gets no deeper
+    deeper = touching + np.radians([0, 0, 0, 10])  # wrist in: the hand digs into the base
+    assert guard.check_configuration(away, g, limits)[0] is None
+    refusal = guard.check_configuration(deeper, g, limits)[0]
+    assert refusal is not None and refusal.code == "COLLISION"
+    assert guard.check_configuration(away, g)[0] is not None  # without the start contacts it is still refused

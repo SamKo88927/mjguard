@@ -13,6 +13,7 @@ joints = ["fr3_joint1", "fr3_joint2", "fr3_joint3", "fr3_joint4", "fr3_joint5", 
 tcp_site = "attachment_site"
 tool_axis = "z"
 actuators = ["fr3_joint1", "fr3_joint2", "fr3_joint3", "fr3_joint4", "fr3_joint5", "fr3_joint6", "fr3_joint7"]
+gravity_compensation = true  # the arm's own controller compensates gravity
 
 [limits]
 min_clearance_mm = 20

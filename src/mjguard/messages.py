@@ -95,6 +95,9 @@ TEMPLATES: dict[str, dict[str, Template]] = {
         "PLAN_STALE": lambda d: "The arm has moved since the preview. Preview again.",
         "POSE_UNKNOWN": lambda d: f"No saved pose called {d.get('name', '')}.".replace("  ", " "),
         "STOP_LATCHED": lambda d: "Stopped. Release the stop before moving again.",
+        "TARGET_MISSED": lambda d: (
+            f"The arm stopped {_mm(_num(d, 'miss_mm') or 0)} mm short of the target. It may be overloaded."
+        ),
     },
     "zh-TW": {
         "JOINT_LIMIT": lambda d: f"關節 {d.get('joint', '')} 會超出可動範圍，已停止規劃",
@@ -117,6 +120,7 @@ TEMPLATES: dict[str, dict[str, Template]] = {
         "PLAN_STALE": lambda d: "手臂已經不在預覽的起點，請重新預覽",
         "POSE_UNKNOWN": lambda d: f"沒有叫做「{d.get('name', '')}」的姿勢",
         "STOP_LATCHED": lambda d: "已停止，解除停止後才能再動",
+        "TARGET_MISSED": lambda d: f"手臂沒到目標，差了 {_mm(_num(d, 'miss_mm') or 0)} mm，可能負載太重或馬達力量不夠",
     },
 }
 

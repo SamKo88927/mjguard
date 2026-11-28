@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 (2026-11-27)
+## 0.5.0 (2026-11-28)
 
 Multi-step tasks: "pick the part and put it in the bin" is one preview and one approval. Nothing widens the envelope.
 
@@ -24,9 +24,20 @@ Multi-step tasks: "pick the part and put it in the bin" is one preview and one a
 - Events `sequence_started`, `step_started`, `step_finished`, `sequence_finished`; motion events carry `step` and
   `steps` during a sequence. A step refused mid-run publishes `refused` with its step.
 - The motion tools and sequence steps now share one planner per tool.
-- Found while measuring the tolerance, not fixed here: on Kinova Gen3 under physics a single `move_to` can report
-  `ok: true` with 100 to 190 mm tool tracking error. The envelope held (the monitor checks clearance, not arrival),
-  but the arm did not get there.
+- Fix: a motion reported `ok: true` even when the arm never arrived. On Kinova Gen3 under physics a `move_to` came
+  back `ok: true` 70 to 190 mm from its target. The envelope held (the monitor checks clearance and contacts), but
+  `ok` must mean "got there": a motion whose tool point settles farther than `limits.arrival_tolerance_mm` (default:
+  the planning margin, at least 5 mm) from the planned end now reports `TARGET_MISSED`, and a sequence halts there.
+- Simulator: servos settle until the arm is still (at most 2 s) instead of a fixed 0.3 s, which had hidden slow
+  arrivals and an oscillating Z1. `[arm] gravity_compensation` (on for UR5e, UR10e, Panda, FR3, iiwa 14, Gen3, xArm7)
+  simulates the arm controller cancelling gravity, as those arms do; hobby servos keep their sag. Gen3 now arrives
+  within about 1 mm where it was 70 to 80 mm off. The Z1 preset is simulated kinematically: Menagerie's Z1 servos
+  cannot lift the arm back against gravity and its torque controller is not modelled.
+- An arm the monitor halted while touching itself or the floor could not move at all, not even away. A plan that
+  starts in contact may now move as long as no start contact gets deeper and no new one appears; contacts with a
+  configured obstacle are never tolerated. The monitor applies the same rule.
+- Known gap: self-collision has no planning margin yet (only penetration is checked), so under physics lag an arm can
+  brush its own links and be halted by the monitor (`ENVELOPE_BREACH`), as the Z1 did on a straight-line descent.
 
 ## 0.4.2 (2026-11-27)
 
